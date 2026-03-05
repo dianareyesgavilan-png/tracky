@@ -1,4 +1,3 @@
-src/App.jsx
 import { useState, useRef, useEffect, useCallback } from "react";
 
 /* ═══ SKINS ═══════════════════════════════════════════════════════════════ */
