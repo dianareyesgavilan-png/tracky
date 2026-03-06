@@ -1,8 +1,0 @@
-    /api/analyze.js
-/api/health.js
-/public/sw.js       ← carpeta nueva
-/src/App.jsx        ← carpeta nueva
-/src/main.jsx       ← carpeta nueva
-/index.html
-/package.json
-/vite.config.js
