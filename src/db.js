@@ -152,6 +152,16 @@ export async function verifyUser(userId, pin) {
   }
 }
 
+export async function deleteUserAccount(userId) {
+  // Remove from localStorage
+  const users = lsGet('users', []).filter(u => u.id !== userId)
+  lsSet('users', users)
+  // Remove from Supabase
+  if (isSupabaseConfigured) {
+    try { await supabase.from('users').delete().eq('id', userId) } catch {}
+  }
+}
+
 export async function updateUserPrefs(userId, { lang, skin }) {
   if (!isSupabaseConfigured) return ls_updateUserPrefs(userId, { lang, skin })
   try {

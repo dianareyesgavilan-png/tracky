@@ -3,6 +3,7 @@ import {
   getUsers, createUser, verifyUser, updateUserPrefs,
   getUserData, saveDayData,
   getPresets, addPreset, deletePreset as dbDeletePreset,
+  deleteUserAccount,
 } from './db';
 
 /* ═══ SKINS ═══════════════════════════════════════════════════════════════ */
@@ -713,6 +714,11 @@ function AuthScreen({ onLogin }) {
   const [selUser,setSelUser]=useState(null); const [err,setErr]=useState("");
   const [selLang,setSelLang]=useState("en"); const [selSkin,setSelSkin]=useState("green");
   const [authLoading,setAuthLoading]=useState(false);
+  const deleteUser=async(u)=>{
+    if(!confirm(`¿Eliminar la cuenta de ${u.name}?`)) return;
+    await deleteUserAccount(u.id);
+    setUsers(us=>us.filter(x=>x.id!==u.id));
+  };
   const S=SKINS[selSkin]; const t=T[selLang];
   useEffect(()=>{ getUsers().then(setUsers); },[]);
   const doLogin=async()=>{ if(pin.length!==4){setErr(t.pinDigits);return;} setAuthLoading(true); const verified=await verifyUser(selUser.id,pin); setAuthLoading(false); if(!verified){setErr("Wrong PIN");setPin("");return;} onLogin(verified); };
@@ -741,13 +747,16 @@ function AuthScreen({ onLogin }) {
             <div style={{display:"grid",gap:8,marginBottom:16}}>
               {users.map(u=>{
                 const uS=SKINS[u.skin||"green"];
-                return <button key={u.id} onClick={()=>{setSelUser(u);setMode("login");setPin("");setErr("");setSelLang(u.lang||"en");setSelSkin(u.skin||"green");}}
-                  style={{background:S.surface,border:`1px solid ${S.border}`,borderRadius:14,padding:"13px 16px",color:S.text,fontSize:15,cursor:"pointer",textAlign:"left",fontFamily:"'Plus Jakarta Sans',sans-serif",fontWeight:700,display:"flex",alignItems:"center",gap:12,transition:"all 0.15s"}}
-                  onMouseOver={e=>e.currentTarget.style.background=S.accentDim} onMouseOut={e=>e.currentTarget.style.background=S.surface}>
-                  <div style={{width:36,height:36,borderRadius:"50%",background:uS.accentDim,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,color:uS.accent,fontWeight:700,flexShrink:0,border:`2px solid ${uS.accent}55`}}>{u.name[0].toUpperCase()}</div>
-                  <div style={{flex:1}}>{u.name}</div>
-                  <div style={{width:10,height:10,borderRadius:"50%",background:uS.accent,opacity:0.7}}/>
-                </button>;
+                return <div key={u.id} style={{display:"flex",gap:6,alignItems:"center"}}>
+                  <button onClick={()=>{setSelUser(u);setMode("login");setPin("");setErr("");setSelLang(u.lang||"en");setSelSkin(u.skin||"green");}}
+                    style={{flex:1,background:S.surface,border:`1px solid ${S.border}`,borderRadius:14,padding:"13px 16px",color:S.text,fontSize:15,cursor:"pointer",textAlign:"left",fontFamily:"'Plus Jakarta Sans',sans-serif",fontWeight:700,display:"flex",alignItems:"center",gap:12,transition:"all 0.15s"}}
+                    onMouseOver={e=>e.currentTarget.style.background=S.accentDim} onMouseOut={e=>e.currentTarget.style.background=S.surface}>
+                    <div style={{width:36,height:36,borderRadius:"50%",background:uS.accentDim,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,color:uS.accent,fontWeight:700,flexShrink:0,border:`2px solid ${uS.accent}55`}}>{u.name[0].toUpperCase()}</div>
+                    <div style={{flex:1}}>{u.name}</div>
+                    <div style={{width:10,height:10,borderRadius:"50%",background:uS.accent,opacity:0.7}}/>
+                  </button>
+                  <button onClick={()=>deleteUser(u)} style={{background:"rgba(255,80,80,0.08)",border:"1px solid rgba(255,80,80,0.2)",color:"rgba(255,100,100,0.6)",borderRadius:10,width:36,height:36,fontSize:14,cursor:"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button>
+                </div>;
               })}
             </div>
             <div style={{textAlign:"center",marginBottom:12,color:"rgba(255,255,255,0.15)",fontSize:12}}>— {t.or} —</div>
