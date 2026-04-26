@@ -1,4 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import {
+  getUsers, createUser, verifyUser, updateUserPrefs,
+  getUserData, saveDayData,
+  getPresets, addPreset, deletePreset as dbDeletePreset,
+} from './db';
 
 /* ═══ SKINS ═══════════════════════════════════════════════════════════════ */
 const SKINS = {
@@ -62,6 +67,9 @@ const T = {
     analyzeAI:"Analyze with AI", usePreset:"Use Preset", saveAsPreset:"Save as Preset",
     presetName:"Preset name…", noPresets:"No presets yet", use:"Use", presetSaved:"✓ Saved",
     manualInput:"Manual", titleHint:"What did you eat? e.g. milanesa con pure", analyzeWithTitle:"Analyze portions",
+    streak:"day streak", dailyGoals:"Daily Goals", noGoals:"Set goals to track progress here",
+    goalKcal:"Calories", goalProtein:"Protein (g)", goalCarbs:"Carbs (g)", goalFat:"Fat (g)",
+    setGoals:"Daily Goals", goalsHint:"Your daily nutrition targets",
   },
   es: {
     appTagline:"diario de comidas", today:"Hoy", week:"Semana", history:"Historial",
@@ -99,6 +107,9 @@ const T = {
     analyzeAI:"Analizar con IA", usePreset:"Usar Preset", saveAsPreset:"Guardar Preset",
     presetName:"Nombre del preset…", noPresets:"Sin presets todavía", use:"Usar", presetSaved:"✓ Guardado",
     manualInput:"Manual", titleHint:"¿Qué comiste? ej. milanesa con puré", analyzeWithTitle:"Analizar porciones",
+    streak:"días seguidos", dailyGoals:"Meta del día", noGoals:"Definí tus metas para ver el progreso aquí",
+    goalKcal:"Calorías", goalProtein:"Proteína (g)", goalCarbs:"Carbos (g)", goalFat:"Grasa (g)",
+    setGoals:"Metas diarias", goalsHint:"Tus objetivos nutricionales diarios",
   },
 };
 
@@ -127,6 +138,20 @@ function getWeekDays(anchor) {
   const mon=new Date(a); mon.setDate(a.getDate()-((a.getDay()+6)%7));
   return Array.from({length:7},(_,i)=>{ const dd=new Date(mon); dd.setDate(mon.getDate()+i); return isoDate(dd); });
 }
+function calcStreak(history) {
+  const d=new Date(); let streak=0;
+  for(let i=0;i<366;i++){
+    const key=isoDate(d);
+    const hasLog=Object.values(history[key]?.meals||{}).some(e=>e?.status==="done");
+    if(!hasLog){if(i===0){d.setDate(d.getDate()-1);continue;}break;}
+    streak++; d.setDate(d.getDate()-1);
+  }
+  return streak;
+}
+function loadGoals(uid) { try{return JSON.parse(localStorage.getItem(`tracky-goals-${uid}`)||"null");}catch{return null;} }
+function saveGoals(uid,g) { try{localStorage.setItem(`tracky-goals-${uid}`,JSON.stringify(g));}catch{} }
+const DEFAULT_GOALS={kcal:2000,protein:120,carbs:200,fat:65};
+
 function getCalendarDays(year,month) {
   const first=new Date(year,month,1); const last=new Date(year,month+1,0);
   const startDow=(first.getDay()+6)%7;
@@ -137,6 +162,74 @@ function getCalendarDays(year,month) {
 function toBase64(file) { return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result.split(",")[1]); r.onerror=rej; r.readAsDataURL(file); }); }
 async function resizeImage(base64,mediaType,maxW=600) {
   return new Promise(res=>{ const img=new Image(); img.onload=()=>{ const s=Math.min(1,maxW/img.width); const c=document.createElement("canvas"); c.width=Math.round(img.width*s); c.height=Math.round(img.height*s); c.getContext("2d").drawImage(img,0,0,c.width,c.height); res(c.toDataURL("image/jpeg",0.5).split(",")[1]); }; img.src=`data:${mediaType};base64,${base64}`; });
+}
+function photoSrc(photo) {
+  if (!photo) return null;
+  if (photo.url) return photo.url;
+  if (photo.base64) return `data:${photo.mediaType||"image/jpeg"};base64,${photo.base64}`;
+  return null;
+}
+
+/* ═══ TODAY HEADER ════════════════════════════════════════════════════════ */
+function TodayHeader({ streak, kcal, loggedCount, goals, S, t }) {
+  const hasGoal=goals?.kcal>0;
+  const pct=hasGoal?Math.min(100,Math.round(kcal/goals.kcal*100)):null;
+  const over=hasGoal&&kcal>goals.kcal;
+  if(!streak&&!kcal) return null;
+  return (
+    <div style={{display:"flex",gap:10,marginBottom:16}}>
+      {streak>0&&<div style={{background:"rgba(255,180,80,0.08)",border:"1px solid rgba(255,180,80,0.18)",borderRadius:14,padding:"13px 16px",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+        <span style={{fontSize:24}}>🔥</span>
+        <div>
+          <div style={{fontSize:22,fontWeight:800,color:S.orange,fontFamily:"monospace",lineHeight:1}}>{streak}</div>
+          <div style={{fontSize:9,color:S.textMuted,textTransform:"uppercase",letterSpacing:1,marginTop:3}}>{t.streak}</div>
+        </div>
+      </div>}
+      {kcal>0&&<div style={{flex:1,background:S.surface,border:`1px solid ${S.border}`,borderRadius:14,padding:"13px 14px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:hasGoal?7:0}}>
+          <div style={{fontSize:26,fontWeight:800,color:S.accent,fontFamily:"monospace",lineHeight:1}}>{kcal}</div>
+          <div style={{fontSize:10,color:S.textMuted}}>{t.kcal} · {loggedCount}/6</div>
+        </div>
+        {hasGoal&&<>
+          <div style={{height:5,borderRadius:3,background:"rgba(255,255,255,0.07)"}}>
+            <div style={{height:"100%",width:`${pct}%`,background:over?S.orange:S.accent,borderRadius:3,transition:"width 0.6s ease"}}/>
+          </div>
+          <div style={{fontSize:10,color:over?S.orange:S.textMuted,marginTop:5}}>{pct}% {t.of} {goals.kcal} kcal</div>
+        </>}
+      </div>}
+    </div>
+  );
+}
+
+/* ═══ GOALS PROGRESS ══════════════════════════════════════════════════════ */
+function GoalsProgress({ totals, goals, S, t }) {
+  if(!goals) return <div style={{marginTop:14,background:S.surface,border:`1px dashed ${S.border}`,borderRadius:13,padding:"14px",textAlign:"center",color:S.textMuted,fontSize:12}}>{t.noGoals}</div>;
+  const items=[
+    [t.protein, totals.protein, goals.protein, "#f4845f"],
+    [t.carbs,   totals.carbs,   goals.carbs,   "#f6c954"],
+    [t.fat,     totals.fat,     goals.fat,      "#c084fc"],
+    [t.fibre,   totals.fibre,   null,           S.blue],
+  ].filter(([,,goal])=>goal>0);
+  return (
+    <div style={{marginTop:14,background:S.surface,border:`1px solid ${S.border}`,borderRadius:13,padding:"14px 14px 10px"}}>
+      <div style={{fontSize:10,color:S.textMuted,textTransform:"uppercase",letterSpacing:1,marginBottom:12}}>{t.dailyGoals}</div>
+      {items.map(([label,val,goal,col])=>{
+        const pct=Math.min(100,Math.round(val/(goal||1)*100));
+        const over=val>goal;
+        return (
+          <div key={label} style={{marginBottom:10}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
+              <span style={{fontSize:11,color:S.textMuted}}>{label}</span>
+              <span style={{fontSize:12,fontWeight:600,color:over?S.orange:col,fontFamily:"monospace"}}>{val}g <span style={{fontWeight:400,color:S.textMuted}}>/ {goal}g</span></span>
+            </div>
+            <div style={{height:5,borderRadius:3,background:"rgba(255,255,255,0.07)"}}>
+              <div style={{height:"100%",width:`${pct}%`,background:over?S.orange:col,borderRadius:3,transition:"width 0.6s ease"}}/>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 /* ═══ MACRO BAR ═══════════════════════════════════════════════════════════ */
@@ -202,12 +295,7 @@ async function analyzeImage(base64,mediaType,slotId,lang="en",title="") {
   } catch(e){ console.error(e); return{description:"",ingredients:[],totals:{calories:0,protein:0,carbs:0,fat:0,fibre:0}}; }
 }
 
-/* ═══ STORAGE ════════════════════════════════════════════════════════════ */
-const USERS_KEY="tracky-users-v2";
-function loadUsers()         { try{return JSON.parse(localStorage.getItem(USERS_KEY)||"[]");}catch{return[];} }
-function saveUsers(u)        { try{localStorage.setItem(USERS_KEY, JSON.stringify(u));}catch{} }
-function loadUserData(uid)   { try{return JSON.parse(localStorage.getItem(`tracky-d-${uid}`)||"{}");}catch{return{};} }
-function saveUserData(uid,d) { try{ localStorage.setItem(`tracky-d-${uid}`, JSON.stringify(d)); } catch(e){ console.warn("Storage full, stripping photos"); const stripped=JSON.parse(JSON.stringify(d)); Object.values(stripped).forEach(day=>{ Object.values(day.meals||{}).forEach(meal=>{ (meal.photos||[]).forEach(p=>{if(p.base64&&p.base64.length>5000)p.base64="";}); }); }); try{localStorage.setItem(`tracky-d-${uid}`, JSON.stringify(stripped));}catch(e2){console.error("Storage failed:",e2);} } }
+/* ═══ STORAGE — migrated to Supabase (see src/db.js) ═════════════════════ */
 
 /* ═══ WORDMARK ═══════════════════════════════════════════════════════════ */
 function Wordmark({ S, size=28 }) {
@@ -219,9 +307,11 @@ function Wordmark({ S, size=28 }) {
 }
 
 /* ═══ SETTINGS MODAL ════════════════════════════════════════════════════ */
-function SettingsModal({ user, S, lang, skinId, onSave, onClose }) {
+function SettingsModal({ user, S, lang, skinId, onSave, onClose, history, goals, onSaveGoals }) {
   const [selLang,setSelLang]=useState(lang);
   const [selSkin,setSelSkin]=useState(skinId);
+  const [selGoals,setSelGoals]=useState(goals||DEFAULT_GOALS);
+  const setGoal=(k,v)=>setSelGoals(g=>({...g,[k]:parseInt(v)||0}));
   const t=T[selLang]; const PS=SKINS[selSkin];
   const slots=getMealSlots(selLang);
   const defaultReminders=slots.reduce((a,s)=>({...a,[s.id]:{enabled:true,time:`${String(s.rH).padStart(2,"0")}:${String(s.rM+30).padStart(2,"0")}`}}),{});
@@ -285,9 +375,25 @@ function SettingsModal({ user, S, lang, skinId, onSave, onClose }) {
             {notifStatus==="granted"?"🔔 "+t.reminderSet.replace("✓ ",""):"🔔 "+t.enableReminders}
           </button>
         </div>
-        <button onClick={()=>{ const data=loadUserData(user.id); exportBackup(data,data[todayKey()]||{},todayKey(),user.id,user.name); localStorage.setItem(`tracky-lastbackup-${user.id}`,Date.now().toString()); }} style={{width:"100%",marginBottom:8,background:"rgba(255,255,255,0.04)",border:`1px solid ${S.border}`,color:S.textMuted,borderRadius:11,padding:"11px 0",fontSize:13,fontWeight:600,cursor:"pointer"}}>💾 {lang==="es"?"Backup ahora":"Backup now"}</button>
+        {/* Goals */}
+        <div style={{marginBottom:18}}>
+          <div style={{fontSize:10,color:S.textMuted,textTransform:"uppercase",letterSpacing:1.5,marginBottom:4}}>{t.setGoals}</div>
+          <div style={{fontSize:11,color:S.textMuted,marginBottom:10}}>{t.goalsHint}</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            {[[t.goalKcal,"kcal","kcal"],[t.goalProtein,"protein","g"],[t.goalCarbs,"carbs","g"],[t.goalFat,"fat","g"]].map(([label,key,unit])=>(
+              <div key={key}>
+                <div style={{fontSize:10,color:S.textMuted,marginBottom:4}}>{label}</div>
+                <div style={{display:"flex",alignItems:"center",background:S.surface,border:`1px solid ${S.border}`,borderRadius:9,overflow:"hidden"}}>
+                  <input type="number" value={selGoals[key]||""} onChange={e=>setGoal(key,e.target.value)} style={{flex:1,background:"transparent",border:"none",color:S.text,fontSize:14,fontFamily:"monospace",padding:"8px 10px",outline:"none",width:0}} min={0}/>
+                  <span style={{fontSize:10,color:S.textMuted,paddingRight:8}}>{unit}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <button onClick={()=>{ const today=todayKey(); exportBackup(history,history[today]||{},today,user.id,user.name); localStorage.setItem(`tracky-lastbackup-${user.id}`,Date.now().toString()); }} style={{width:"100%",marginBottom:8,background:"rgba(255,255,255,0.04)",border:`1px solid ${S.border}`,color:S.textMuted,borderRadius:11,padding:"11px 0",fontSize:13,fontWeight:600,cursor:"pointer"}}>💾 {lang==="es"?"Backup ahora":"Backup now"}</button>
         <div style={{display:"flex",gap:8}}>
-          <button onClick={()=>{localStorage.setItem(`tracky-reminders-${user.id}`,JSON.stringify(reminders));const sw=navigator.serviceWorker?.controller;if(sw)sw.postMessage({type:"SCHEDULE_REMINDERS",reminders,lang:selLang});onSave(selLang,selSkin);}} style={{flex:1,background:PS.accent,color:PS.bg,border:"none",borderRadius:11,padding:"12px 0",fontSize:13,fontWeight:700,cursor:"pointer"}}>{t.save}</button>
+          <button onClick={()=>{localStorage.setItem(`tracky-reminders-${user.id}`,JSON.stringify(reminders));const sw=navigator.serviceWorker?.controller;if(sw)sw.postMessage({type:"SCHEDULE_REMINDERS",reminders,lang:selLang});onSaveGoals(selGoals);onSave(selLang,selSkin);}} style={{flex:1,background:PS.accent,color:PS.bg,border:"none",borderRadius:11,padding:"12px 0",fontSize:13,fontWeight:700,cursor:"pointer"}}>{t.save}</button>
           <button onClick={onClose} style={{padding:"12px 16px",background:S.surface,color:S.textMuted,border:`1px solid ${S.border}`,borderRadius:11,fontSize:13,cursor:"pointer"}}>{t.cancel}</button>
         </div>
       </div>
@@ -296,15 +402,16 @@ function SettingsModal({ user, S, lang, skinId, onSave, onClose }) {
 }
 
 /* ═══ INGREDIENT EDITOR ═════════════════════════════════════════════════ */
-function SavePresetBar({ description, ingredients, totals, slotId, userId, S, t }) {
+function SavePresetBar({ description, ingredients, totals, slotId, userId, S, t, onSaved }) {
   const [name,setName]=useState(description||"");
   const [saved,setSaved]=useState(false);
-  const doSave=()=>{
+  const doSave=async()=>{
     if(!name.trim()) return;
-    const existing=loadPresets(userId);
-    const updated=[...existing,{name:name.trim(),slotId,description,ingredients,totals,savedAt:new Date().toISOString()}];
-    savePresets(userId,updated);
-    setSaved(true); setTimeout(()=>setSaved(false),2000);
+    try {
+      const preset=await addPreset(userId,{name:name.trim(),slotId,description,ingredients,totals});
+      setSaved(true); setTimeout(()=>setSaved(false),2000);
+      onSaved?.(preset);
+    } catch(e){ console.error("Save preset failed:",e); }
   };
   return (
     <div style={{marginTop:10,display:"flex",gap:7}}>
@@ -318,7 +425,7 @@ function SavePresetBar({ description, ingredients, totals, slotId, userId, S, t 
   );
 }
 
-function IngredientEditor({ photo, onConfirm, onCancel, S, t, userId, slotId, lang="en" }) {
+function IngredientEditor({ photo, onConfirm, onCancel, S, t, userId, slotId, lang="en", onPresetSaved }) {
   const [title,setTitle]=useState(photo.title||"");
   const [description,setDescription]=useState(photo.description||"");
   const [ingredients,setIngredients]=useState((photo.ingredients||[]).map(i=>({...i,calories:parseInt(i.calories)||0,protein:parseInt(i.protein)||0,carbs:parseInt(i.carbs)||0,fat:parseInt(i.fat)||0,fibre:parseInt(i.fibre)||0})));
@@ -348,7 +455,7 @@ function IngredientEditor({ photo, onConfirm, onCancel, S, t, userId, slotId, la
       setIngredients(p=>{ setEditIdx(p.length); setEditVal(newIng); return [...p,newIng]; });
     } finally { setLookingUp(false); inputRef.current?.focus(); }
   };
-  const previewUrl=photo.imageUrl||(photo.base64?`data:${photo.mediaType||"image/jpeg"};base64,${photo.base64}`:null);
+  const previewUrl=photo.imageUrl||photoSrc(photo);
 
   const NumInput=({label,field,color})=>(
     <div style={{textAlign:"center"}}>
@@ -433,7 +540,7 @@ function IngredientEditor({ photo, onConfirm, onCancel, S, t, userId, slotId, la
             <button onClick={()=>onConfirm({...photo,title,description,ingredients,totals})} style={{flex:1,background:S.accent,color:S.bg,border:"none",borderRadius:11,padding:"12px 0",fontSize:14,fontWeight:700,cursor:"pointer"}}>{t.confirmSave}</button>
             <button onClick={onCancel} style={{padding:"12px 14px",background:"rgba(255,255,255,0.04)",color:S.textMuted,border:`1px solid ${S.border}`,borderRadius:11,fontSize:13,cursor:"pointer"}}>{t.cancel}</button>
           </div>
-          {userId&&slotId&&<SavePresetBar description={description} ingredients={ingredients} totals={totals} slotId={slotId} userId={userId} S={S} t={t}/>}
+          {userId&&slotId&&<SavePresetBar description={description} ingredients={ingredients} totals={totals} slotId={slotId} userId={userId} S={S} t={t} onSaved={onPresetSaved}/>}
         </div>
       </div>
     </div>
@@ -443,13 +550,15 @@ function IngredientEditor({ photo, onConfirm, onCancel, S, t, userId, slotId, la
 /* ═══ AUTH ═══════════════════════════════════════════════════════════════ */
 function AuthScreen({ onLogin }) {
   const [mode,setMode]=useState("pick");
-  const [users,setUsers]=useState(()=>loadUsers());
+  const [users,setUsers]=useState([]);
   const [name,setName]=useState(""); const [pin,setPin]=useState("");
   const [selUser,setSelUser]=useState(null); const [err,setErr]=useState("");
   const [selLang,setSelLang]=useState("en"); const [selSkin,setSelSkin]=useState("green");
+  const [authLoading,setAuthLoading]=useState(false);
   const S=SKINS[selSkin]; const t=T[selLang];
-  const doLogin=()=>{ if(pin.length!==4){setErr(t.pinDigits);return;} if(selUser.pin!==pin){setErr("Wrong PIN");setPin("");return;} onLogin(selUser); };
-  const doSignup=()=>{ if(!name.trim()){setErr(t.enterName);return;} if(pin.length!==4){setErr(t.pinDigits);return;} if(users.find(u=>u.name.toLowerCase()===name.trim().toLowerCase())){setErr(t.nameTaken);return;} const nu={id:Date.now().toString(),name:name.trim(),pin,lang:selLang,skin:selSkin,createdAt:new Date().toISOString()}; const up=[...users,nu]; saveUsers(up); setUsers(up); onLogin(nu); };
+  useEffect(()=>{ getUsers().then(setUsers); },[]);
+  const doLogin=async()=>{ if(pin.length!==4){setErr(t.pinDigits);return;} setAuthLoading(true); const verified=await verifyUser(selUser.id,pin); setAuthLoading(false); if(!verified){setErr("Wrong PIN");setPin("");return;} onLogin(verified); };
+  const doSignup=async()=>{ if(!name.trim()){setErr(t.enterName);return;} if(pin.length!==4){setErr(t.pinDigits);return;} if(users.find(u=>u.name.toLowerCase()===name.trim().toLowerCase())){setErr(t.nameTaken);return;} setAuthLoading(true); try{ const nu=await createUser({name:name.trim(),pin,lang:selLang,skin:selSkin}); setUsers(u=>[...u,nu]); onLogin(nu); }catch(e){ setErr(e.message||"Signup failed"); } finally{ setAuthLoading(false); } };
   const pressPin=k=>{if(k==="⌫"){setPin(p=>p.slice(0,-1));setErr("");}else if(pin.length<4)setPin(p=>p+k);};
   const PinDots=({v})=>(<div style={{display:"flex",gap:14,justifyContent:"center",margin:"18px 0"}}>{[0,1,2,3].map(i=><div key={i} style={{width:13,height:13,borderRadius:"50%",background:i<v.length?S.accent:S.border,transition:"background 0.15s",boxShadow:i<v.length?`0 0 8px ${S.accent}50`:"none"}}/>)}</div>);
   const Numpad=()=>(<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,maxWidth:230,margin:"0 auto"}}>{[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((k,i)=>(<button key={i} onClick={()=>k!==""&&pressPin(String(k))} style={{padding:"14px 0",fontSize:k==="⌫"?16:20,background:k===""?"transparent":S.surface,border:k===""?"none":`1px solid ${S.border}`,borderRadius:12,color:S.text,cursor:k===""?"default":"pointer",transition:"background 0.1s"}} onMouseOver={e=>{if(k!=="")e.currentTarget.style.background=S.accentDim;}} onMouseOut={e=>{if(k!=="")e.currentTarget.style.background=S.surface;}}>{k}</button>))}</div>);
@@ -495,7 +604,7 @@ function AuthScreen({ onLogin }) {
           <div style={{fontSize:12,color:S.textMuted,marginBottom:2}}>{t.enterPin}</div>
           <PinDots v={pin}/>{err&&<div style={{fontSize:12,color:"#ff8a8a",marginBottom:8}}>{err}</div>}<Numpad/>
           <div style={{display:"flex",gap:10,marginTop:16}}>
-            <button onClick={doLogin} disabled={pin.length!==4} style={{flex:1,background:pin.length===4?S.accent:S.surface,color:pin.length===4?S.bg:"rgba(255,255,255,0.25)",border:"none",borderRadius:12,padding:"12px 0",fontSize:14,fontWeight:700,cursor:pin.length===4?"pointer":"default",transition:"all 0.2s"}}>{t.unlock}</button>
+            <button onClick={doLogin} disabled={pin.length!==4||authLoading} style={{flex:1,background:pin.length===4?S.accent:S.surface,color:pin.length===4?S.bg:"rgba(255,255,255,0.25)",border:"none",borderRadius:12,padding:"12px 0",fontSize:14,fontWeight:700,cursor:pin.length===4?"pointer":"default",transition:"all 0.2s"}}>{authLoading?"…":t.unlock}</button>
             <button onClick={()=>{setMode("pick");setPin("");setErr("");}} style={{padding:"12px 14px",background:S.surface,color:S.textMuted,border:`1px solid ${S.border}`,borderRadius:12,fontSize:13,cursor:"pointer"}}>{t.back}</button>
           </div>
         </div>}
@@ -507,7 +616,7 @@ function AuthScreen({ onLogin }) {
           <div style={{fontSize:12,color:S.textMuted,marginBottom:2}}>{t.choosePin}</div>
           <PinDots v={pin}/>{err&&<div style={{fontSize:12,color:"#ff8a8a",marginBottom:8}}>{err}</div>}<Numpad/>
           <div style={{display:"flex",gap:10,marginTop:16}}>
-            <button onClick={doSignup} disabled={pin.length!==4||!name.trim()} style={{flex:1,background:pin.length===4&&name.trim()?S.accent:S.surface,color:pin.length===4&&name.trim()?S.bg:"rgba(255,255,255,0.25)",border:"none",borderRadius:12,padding:"12px 0",fontSize:14,fontWeight:700,cursor:pin.length===4&&name.trim()?"pointer":"default",transition:"all 0.2s"}}>{t.createAccount}</button>
+            <button onClick={doSignup} disabled={pin.length!==4||!name.trim()||authLoading} style={{flex:1,background:pin.length===4&&name.trim()?S.accent:S.surface,color:pin.length===4&&name.trim()?S.bg:"rgba(255,255,255,0.25)",border:"none",borderRadius:12,padding:"12px 0",fontSize:14,fontWeight:700,cursor:pin.length===4&&name.trim()?"pointer":"default",transition:"all 0.2s"}}>{authLoading?"…":t.createAccount}</button>
             <button onClick={()=>{setMode("pick");setPin("");setErr("");}} style={{padding:"12px 14px",background:S.surface,color:S.textMuted,border:`1px solid ${S.border}`,borderRadius:12,fontSize:13,cursor:"pointer"}}>{t.back}</button>
           </div>
         </div>}
@@ -517,9 +626,6 @@ function AuthScreen({ onLogin }) {
 }
 
 /* ═══ MEAL MODAL ═════════════════════════════════════════════════════════ */
-function loadPresets(userId) { try{return JSON.parse(localStorage.getItem(`tracky-presets-${userId}`)||"[]");}catch{return[];} }
-function savePresets(userId,presets) { try{localStorage.setItem(`tracky-presets-${userId}`,JSON.stringify(presets));}catch{} }
-
 function MealModal({ slot, entry, onSave, onClose, isBackfill, S, t, userId, lang }) {
   const [photos,setPhotos]=useState(entry?.photos||[]);
   const [notes,setNotes]=useState(entry?.notes||"");
@@ -534,7 +640,8 @@ function MealModal({ slot, entry, onSave, onClose, isBackfill, S, t, userId, lan
   const [showManualInput,setShowManualInput]=useState(false);
   const [manualInput,setManualInput]=useState("");
   const [showPresets,setShowPresets]=useState(false);
-  const [presets,setPresets]=useState(()=>loadPresets(userId));
+  const [presets,setPresets]=useState([]);
+  useEffect(()=>{ getPresets(userId).then(ps=>setPresets(ps.map(p=>({...p,slotId:p.slot_id})))); },[userId]);
   const fileRef=useRef();
   useEffect(()=>{ if(!timestamp){if(isBackfill)setTimestamp(`${String(slot.rH).padStart(2,"0")}:${String(slot.rM).padStart(2,"0")}`);else setTimestamp(new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",hour12:false}));} },[]);
 
@@ -595,23 +702,23 @@ function MealModal({ slot, entry, onSave, onClose, isBackfill, S, t, userId, lan
 
   const handleConfirm=confirmed=>{ const{_resolve,...photo}=confirmed; if(editingPhotoIdx!==null){setPhotos(p=>p.map((x,i)=>i===editingPhotoIdx?photo:x));setEditingPhotoIdx(null);}else{setPhotos(p=>[...p,photo]);} setPendingPhoto(null); _resolve(); };
   const handleCancel=()=>{ const{_resolve}=pendingPhoto; setPendingPhoto(null); setEditingPhotoIdx(null); _resolve(); };
-  const deletePreset=(idx)=>{ const updated=presets.filter((_,j)=>j!==idx); setPresets(updated); savePresets(userId,updated); };
-  const editPhoto=(i)=>{ const p=photos[i]; setEditingPhotoIdx(i); new Promise(resolve=>setPendingPhoto({...p,imageUrl:p.base64?`data:image/jpeg;base64,${p.base64}`:null,_resolve:resolve})); };
+  const deletePreset=async(idx)=>{ const preset=presets[idx]; setPresets(p=>p.filter((_,j)=>j!==idx)); if(preset?.id) await dbDeletePreset(preset.id); };
+  const editPhoto=(i)=>{ const p=photos[i]; setEditingPhotoIdx(i); new Promise(resolve=>setPendingPhoto({...p,imageUrl:p.imageUrl||photoSrc(p),_resolve:resolve})); };
   const replacePhotoImage=(i,file)=>{
     const reader=new FileReader();
     reader.onload=async()=>{
       const raw=reader.result.split(",")[1];
       const resized=await resizeImage(raw,file.type);
-      setPhotos(p=>p.map((x,idx)=>idx===i?{...x,base64:resized,mediaType:"image/jpeg",imageUrl:`data:image/jpeg;base64,${resized}`}:x));
+      setPhotos(p=>p.map((x,idx)=>idx===i?{...x,base64:resized,mediaType:"image/jpeg",imageUrl:`data:image/jpeg;base64,${resized}`,url:null}:x));
     };
     reader.readAsDataURL(file);
   };
   const mealTotals=photos.reduce((a,p)=>{ const tt=p.totals||{}; return{calories:a.calories+(tt.calories||0),protein:a.protein+(tt.protein||0),carbs:a.carbs+(tt.carbs||0),fat:a.fat+(tt.fat||0),fibre:a.fibre+(tt.fibre||0)}; },{calories:0,protein:0,carbs:0,fat:0,fibre:0});
   const allFoods=[...new Set(photos.flatMap(p=>(p.ingredients||[]).map(i=>i.name)))];
   const handleSave=()=>{ if(!photos.length&&!notes.trim()){onSave(null);onClose();return;} const toStore=photos.map(p=>({base64:p.base64,mediaType:p.mediaType||"image/jpeg",description:p.description,ingredients:p.ingredients,totals:p.totals})); onSave({photos:toStore,notes,foods:allFoods,ingredients:photos.flatMap(p=>p.ingredients||[]),totals:mealTotals,timestamp,status:"done"}); onClose(); };
-  const previews=photos.map(p=>({...p,previewUrl:p.imageUrl||(p.base64?`data:${p.mediaType||"image/jpeg"};base64,${p.base64}`:null)}));
+  const previews=photos.map(p=>({...p,previewUrl:p.imageUrl||photoSrc(p)}));
   return (
-    <>{pendingPhoto&&<IngredientEditor photo={pendingPhoto} onConfirm={handleConfirm} onCancel={handleCancel} S={S} t={t} userId={userId} slotId={slot.id} lang={lang}/>}
+    <>{pendingPhoto&&<IngredientEditor photo={pendingPhoto} onConfirm={handleConfirm} onCancel={handleCancel} S={S} t={t} userId={userId} slotId={slot.id} lang={lang} onPresetSaved={p=>setPresets(ps=>[p,...ps])}/>}
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.82)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200}} onClick={onClose}>
       <div style={{background:S.card,borderRadius:"22px 22px 0 0",width:"100%",maxWidth:560,maxHeight:"90vh",overflow:"auto",padding:"18px 18px 36px"}} onClick={e=>e.stopPropagation()}>
         <div style={{width:36,height:4,background:"rgba(255,255,255,0.12)",borderRadius:2,margin:"0 auto 16px"}}/>
@@ -679,7 +786,7 @@ function MealModal({ slot, entry, onSave, onClose, isBackfill, S, t, userId, lan
                     <div style={{fontSize:10,color:S.textMuted,marginTop:1}}>{p.totals?.calories} kcal · {p.ingredients?.length} ingredients</div>
                   </div>
                   <button onClick={()=>usePresetEntry(p)} style={{background:S.accentDim,border:`1px solid ${S.accentBorder}`,color:S.accent,borderRadius:8,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer",flexShrink:0}}>{lang==="es"?"Usar":"Use"}</button>
-                  <button onClick={()=>{const updated=presets.filter((_,j)=>j!==presets.indexOf(p));setPresets(updated);savePresets(userId,updated);}} style={{background:"rgba(255,80,80,0.08)",border:"1px solid rgba(255,80,80,0.2)",color:"rgba(255,80,80,0.6)",borderRadius:8,padding:"5px 8px",fontSize:11,cursor:"pointer",flexShrink:0}}>×</button>
+                  <button onClick={async()=>{setPresets(ps=>ps.filter(x=>x.id!==p.id));if(p.id)await dbDeletePreset(p.id);}} style={{background:"rgba(255,80,80,0.08)",border:"1px solid rgba(255,80,80,0.2)",color:"rgba(255,80,80,0.6)",borderRadius:8,padding:"5px 8px",fontSize:11,cursor:"pointer",flexShrink:0}}>×</button>
                 </div>
               ))
             }
@@ -755,7 +862,7 @@ function MealGrid({ meals, onUpdate, readOnly, isBackfill, S, t, lang, userId })
   const slots=getMealSlots(lang);
   return (
     <>{<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-      {slots.map(slot=>{ const e=meals?.[slot.id]; const done=e?.status==="done"; const fp=e?.photos?.[0]; const previewUrl=fp?.imageUrl||(fp?.base64?`data:${fp.mediaType||"image/jpeg"};base64,${fp.base64}`:null);
+      {slots.map(slot=>{ const e=meals?.[slot.id]; const done=e?.status==="done"; const fp=e?.photos?.[0]; const previewUrl=fp?.imageUrl||photoSrc(fp);
         return <div key={slot.id} onClick={()=>!readOnly&&setActiveSlot(slot)} style={{position:"relative",borderRadius:16,overflow:"hidden",cursor:readOnly?"default":"pointer",aspectRatio:"1.05",background:done?"rgba(255,255,255,0.05)":S.surface,border:done?`1px solid ${S.accentBorder}`:`1px dashed ${S.border}`,transition:"all 0.18s"}}
           onMouseOver={ev=>{if(!readOnly)ev.currentTarget.style.borderColor=done?S.accent:S.accentBorder;}} onMouseOut={ev=>ev.currentTarget.style.borderColor=done?S.accentBorder:S.border}>
           {previewUrl&&<img src={previewUrl} alt="" style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover",opacity:0.45}}/>}
@@ -946,12 +1053,15 @@ function exportBackup(history, todayData, today, userId, userName) {
 
 function importBackup(file, userId, onSuccess, onError) {
   const r = new FileReader();
-  r.onload = e => {
+  r.onload = async e => {
     try {
       const parsed = JSON.parse(e.target.result);
-      const data = parsed.data || parsed; // support raw data too
+      const data = parsed.data || parsed;
       if(typeof data !== 'object') throw new Error('Invalid format');
-      saveUserData(userId, data);
+      // Save each day to Supabase
+      await Promise.all(
+        Object.entries(data).map(([date, day]) => saveDayData(userId, date, day))
+      );
       onSuccess(data);
     } catch(err) {
       onError(err.message);
@@ -967,7 +1077,7 @@ function buildPDF(history, userName, lang) {
   const mBar=(tot)=>{ if(!tot)return""; const tt=tot.protein+tot.carbs+tot.fat; if(!tt)return""; const p=Math.round(tot.protein/tt*100),c=Math.round(tot.carbs/tt*100),f=Math.round(tot.fat/tt*100); return `<div style="margin-top:4px"><div style="display:flex;height:5px;border-radius:3px;overflow:hidden;gap:1px;width:130px"><div style="width:${p}%;background:#f4845f"></div><div style="width:${c}%;background:#f6c954"></div><div style="width:${f}%;background:#4db849"></div></div><div style="font-size:9px;color:#888;margin-top:2px"><span style="color:#f4845f">${tot.protein}g P</span> · <span style="color:#a07800">${tot.carbs}g C</span> · <span style="color:#2d7a3a">${tot.fat}g F</span>${tot.fibre?` · <span style="color:#1a4488">${tot.fibre}g Fi</span>`:""}</div></div>`; };
   const dayBlocks=entries.map(([date,day])=>{
     const dTot={calories:0,protein:0,carbs:0,fat:0,fibre:0};
-    const rows=slots.map(s=>{ const e=day.meals?.[s.id]; if(!e||e.status!=="done")return`<tr class="er"><td>${s.icon} ${s.label}</td><td class="mu">—</td><td class="mu">—</td><td></td></tr>`; const tot=e.totals||{}; if(tot.calories){dTot.calories+=tot.calories||0;dTot.protein+=tot.protein||0;dTot.carbs+=tot.carbs||0;dTot.fat+=tot.fat||0;dTot.fibre+=tot.fibre||0;} const iR=(e.ingredients||[]).map(i=>`<div style="display:flex;justify-content:space-between;font-size:10px;color:#555;margin-top:2px;border-bottom:1px dotted #eee;padding:1px 0"><span>${i.name}</span><span style="font-family:monospace;color:#888">${i.calories}kcal <span style="color:#f4845f">${i.protein}P</span> <span style="color:#a07800">${i.carbs}C</span> <span style="color:#2d7a3a">${i.fat}F</span></span></div>`).join(""); const photos=(e.photos||[]).slice(0,3).filter(p=>p.base64).map(p=>`<img src="data:image/jpeg;base64,${p.base64}" style="width:80px;height:60px;object-fit:cover;border-radius:6px;margin:2px;border:1px solid #eee;display:inline-block;vertical-align:top"/>`).join(""); return `<tr><td class="bo">${s.icon} ${s.label}<br><span style="font-size:10px;color:#2d7a3a;font-family:monospace">${e.timestamp||""}</span></td><td>${e.photos?.[0]?.description?`<div style="font-size:11px;color:#555;font-style:italic;margin-bottom:4px">${e.photos[0].description}</div>`:""}${iR}${e.notes?`<div style="font-size:10px;color:#999;margin-top:4px">"${e.notes}"</div>`:""}</td><td>${tot.calories?`<div style="font-size:13px;font-weight:700;color:#1a3a2a;font-family:monospace">${tot.calories} kcal</div>${mBar(tot)}`:"—"}</td><td>${photos}</td></tr>`; }).join("");
+    const rows=slots.map(s=>{ const e=day.meals?.[s.id]; if(!e||e.status!=="done")return`<tr class="er"><td>${s.icon} ${s.label}</td><td class="mu">—</td><td class="mu">—</td><td></td></tr>`; const tot=e.totals||{}; if(tot.calories){dTot.calories+=tot.calories||0;dTot.protein+=tot.protein||0;dTot.carbs+=tot.carbs||0;dTot.fat+=tot.fat||0;dTot.fibre+=tot.fibre||0;} const iR=(e.ingredients||[]).map(i=>`<div style="display:flex;justify-content:space-between;font-size:10px;color:#555;margin-top:2px;border-bottom:1px dotted #eee;padding:1px 0"><span>${i.name}</span><span style="font-family:monospace;color:#888">${i.calories}kcal <span style="color:#f4845f">${i.protein}P</span> <span style="color:#a07800">${i.carbs}C</span> <span style="color:#2d7a3a">${i.fat}F</span></span></div>`).join(""); const photos=(e.photos||[]).slice(0,3).filter(p=>p.base64||p.url).map(p=>{const src=p.url||`data:image/jpeg;base64,${p.base64}`;return`<img src="${src}" style="width:80px;height:60px;object-fit:cover;border-radius:6px;margin:2px;border:1px solid #eee;display:inline-block;vertical-align:top"/>`;}).join(""); return `<tr><td class="bo">${s.icon} ${s.label}<br><span style="font-size:10px;color:#2d7a3a;font-family:monospace">${e.timestamp||""}</span></td><td>${e.photos?.[0]?.description?`<div style="font-size:11px;color:#555;font-style:italic;margin-bottom:4px">${e.photos[0].description}</div>`:""}${iR}${e.notes?`<div style="font-size:10px;color:#999;margin-top:4px">"${e.notes}"</div>`:""}</td><td>${tot.calories?`<div style="font-size:13px;font-weight:700;color:#1a3a2a;font-family:monospace">${tot.calories} kcal</div>${mBar(tot)}`:"—"}</td><td>${photos}</td></tr>`; }).join("");
     const w=day.workout; const wt=day.weight;
     const wRow=w?.type?`<tr style="background:#fffbf0"><td colspan="4" style="font-size:11px;padding:5px 10px;color:#774400">🏋️ <b>${w.type}</b>${w.duration?` · ${w.duration}min`:""}${w.time?` · ${w.time}`:""}${w.intensity?` · ${w.intensity}`:""}</td></tr>`:"";
     const wtRow=wt?`<tr style="background:#f0f5ff"><td colspan="4" style="font-size:11px;padding:5px 10px;color:#224488">⚖️ ${t.weight}: <b>${wt} ${t.kg}</b></td></tr>`:"";
@@ -975,7 +1085,7 @@ function buildPDF(history, userName, lang) {
     return `<div style="margin-bottom:32px;page-break-inside:avoid"><h3 style="font-size:15px;color:#1a3a2a;border-bottom:2px solid #c8e6c0;padding-bottom:6px;margin-bottom:8px;text-transform:capitalize">${fmtFull(date,lang)}</h3><table style="width:100%;border-collapse:collapse;font-size:12px;font-family:Helvetica,Arial,sans-serif"><thead><tr style="background:#edf7ea"><th style="padding:6px 10px;text-align:left;color:#1a3a2a;font-size:10px;text-transform:uppercase;letter-spacing:.8px;width:110px">${lang==="es"?"Comida":"Meal"}</th><th style="padding:6px 10px;text-align:left;color:#1a3a2a;font-size:10px;text-transform:uppercase;letter-spacing:.8px">${lang==="es"?"Ingredientes":"Ingredients"}</th><th style="padding:6px 10px;text-align:left;color:#1a3a2a;font-size:10px;text-transform:uppercase;letter-spacing:.8px;width:155px">Macros</th><th style="padding:6px 10px;text-align:left;color:#1a3a2a;font-size:10px;text-transform:uppercase;letter-spacing:.8px;width:175px">${lang==="es"?"Fotos":"Photos"}</th></tr></thead><tbody>${rows}${wRow}${wtRow}${totRow}</tbody></table></div>`;
   }).join("");
   const tot=entries.length; const meals=entries.reduce((s,[,d])=>s+Object.values(d.meals||{}).filter(e=>e?.status==="done").length,0); const wDays=entries.filter(([,d])=>d.workout?.type).length;
-  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Tracky. — ${userName}</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Georgia,serif;color:#111;padding:44px 48px;max-width:920px;margin:0 auto;font-size:13px;line-height:1.5}h1{font-family:'Plus Jakarta Sans',Helvetica,sans-serif;font-size:30px;font-weight:900;letter-spacing:-1.5px;color:#1a3a2a;margin-bottom:3px}h1 span{color:#2d7a3a}.sub{color:#777;font-size:12px;margin-bottom:12px;font-family:Helvetica,sans-serif}.stats{display:flex;gap:16px;margin-bottom:16px}.sb{background:#edf7ea;border:1px solid #c8e6c0;border-radius:8px;padding:10px 16px;text-align:center}.sb .n{font-size:22px;font-weight:bold;color:#1a3a2a;font-family:'Courier New',monospace}.sb .l{font-size:10px;color:#666;font-family:Helvetica,sans-serif;text-transform:uppercase;letter-spacing:.5px;margin-top:2px}hr{border:none;border-top:2px solid #c8e6c0;margin-bottom:28px}button.pb{background:#1a3a2a;color:white;border:none;padding:9px 22px;border-radius:6px;cursor:pointer;font-size:13px;margin-bottom:28px;font-family:Helvetica,sans-serif}td{padding:8px 10px;vertical-align:top;border-bottom:1px solid #f0f0f0}tr:last-child td{border-bottom:none}tr:nth-child(even) td{background:#fafff9}.er td{color:#bbb}.bo{font-weight:600;color:#222}.mu{color:#bbb}@media print{.pb{display:none}}</style></head><body><h1>Tracky<span>.</span></h1><p class="sub">${userName} · ${new Date().toLocaleDateString(lang==="es"?"es-AR":"en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</p><div class="stats"><div class="sb"><div class="n">${tot}</div><div class="l">${t.days}</div></div><div class="sb"><div class="n">${meals}</div><div class="l">${t.mealsLogged}</div></div><div class="sb"><div class="n">${wDays}</div><div class="l">${t.workoutDays}</div></div></div><button class="pb" onclick="window.print()">🖨 ${t.printPdf}</button><hr/>${dayBlocks||`<p style="color:#aaa">${t.noHistory}</p>`}</body></html>`;
+  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Tracky. — ${userName}</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Georgia,serif;color:#111;padding:44px 48px;max-width:920px;margin:0 auto;font-size:13px;line-height:1.5}h1{font-family:'Plus Jakarta Sans',Helvetica,sans-serif;font-size:30px;font-weight:900;letter-spacing:-1.5px;color:#1a3a2a;margin-bottom:3px}h1 span{color:#2d7a3a}.sub{color:#777;font-size:12px;margin-bottom:12px;font-family:Helvetica,sans-serif}.stats{display:flex;gap:16px;margin-bottom:16px}.sb{background:#edf7ea;border:1px solid #c8e6c0;border-radius:8px;padding:10px 16px;text-align:center}.sb .n{font-size:22px;font-weight:bold;color:#1a3a2a;font-family:'Courier New',monospace}.sb .l{font-size:10px;color:#666;font-family:Helvetica,sans-serif;text-transform:uppercase;letter-spacing:.5px;margin-top:2px}hr{border:none;border-top:2px solid #c8e6c0;margin-bottom:28px}.actions{display:flex;gap:10px;margin-bottom:28px}button.pb{background:#1a3a2a;color:white;border:none;padding:9px 22px;border-radius:6px;cursor:pointer;font-size:13px;font-family:Helvetica,sans-serif}button.back{background:#f4f4f4;color:#333;border:1px solid #ccc}td{padding:8px 10px;vertical-align:top;border-bottom:1px solid #f0f0f0}tr:last-child td{border-bottom:none}tr:nth-child(even) td{background:#fafff9}.er td{color:#bbb}.bo{font-weight:600;color:#222}.mu{color:#bbb}@media print{.actions{display:none}}</style></head><body><h1>Tracky<span>.</span></h1><p class="sub">${userName} · ${new Date().toLocaleDateString(lang==="es"?"es-AR":"en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</p><div class="stats"><div class="sb"><div class="n">${tot}</div><div class="l">${t.days}</div></div><div class="sb"><div class="n">${meals}</div><div class="l">${t.mealsLogged}</div></div><div class="sb"><div class="n">${wDays}</div><div class="l">${t.workoutDays}</div></div></div><div class="actions"><button class="pb back" onclick="window.close()">← ${t.back}</button><button class="pb" onclick="window.print()">🖨 ${t.printPdf}</button></div><hr/>${dayBlocks||`<p style="color:#aaa">${t.noHistory}</p>`}</body></html>`;
   const win=window.open("","_blank"); if(win){win.document.write(html);win.document.close();}
 }
 
@@ -991,46 +1101,34 @@ function App({ user, onLogout }) {
   const [backupMsg,setBackupMsg]=useState("");
   const [showSettings,setShowSettings]=useState(false);
   const [toast,setToast]=useState(null);
+  const [goals,setGoals]=useState(()=>loadGoals(user.id));
   const today=todayKey();
   const S=SKINS[skinId]; const t=T[lang];
 
   const showToast=msg=>{setToast(msg);setTimeout(()=>setToast(null),2600);};
   useEffect(()=>{(async()=>{
-    const data=loadUserData(user.id);
+    const data=await getUserData(user.id);
+    // Apply Apple Health URL params (iOS Shortcut) before setting state
+    const params=new URLSearchParams(window.location.search);
+    const healthParam=params.get("health");
+    if(healthParam){
+      try {
+        const d=JSON.parse(atob(healthParam));
+        if(d.userId===user.id){
+          const date=d.date||today;
+          const existing=data[date]||{meals:{},workout:{},weight:""};
+          const updated={...existing};
+          if(d.weight) updated.weight=String(d.weight);
+          if(d.workout) updated.workout=d.workout;
+          data[date]=updated;
+          saveDayData(user.id,date,updated);
+        }
+        window.history.replaceState({},"",window.location.pathname);
+      } catch(e){ console.error("Health sync error:",e); }
+    }
     setHistory(data);
     if(data[today])setTodayData(data[today]);
-    // Auto daily backup
-    const lastBackup=localStorage.getItem(`tracky-lastbackup-${user.id}`);
-    const lastBackupDay=lastBackup?new Date(parseInt(lastBackup)).toDateString():null;
-    const todayStr=new Date().toDateString();
-    if(lastBackupDay!==todayStr && Object.keys(data).length>0) {
-      exportBackup(data,data[today]||{},today,user.id,user.name);
-      localStorage.setItem(`tracky-lastbackup-${user.id}`,Date.now().toString());
-    }
   })();},[user.id]);
-
-  // Apple Health sync — reads URL params set by iOS Shortcut
-  useEffect(()=>{
-    const params=new URLSearchParams(window.location.search);
-    const healthData=params.get("health");
-    if(!healthData) return;
-    try {
-      const d=JSON.parse(atob(healthData));
-      if(d.userId!==user.id) return;
-      const date=d.date||today;
-      const base=loadUserData(user.id);
-      const existing=base[date]||{meals:{},workout:{},weight:""};
-      const updated={...existing};
-      if(d.weight) updated.weight=String(d.weight);
-      if(d.workout) updated.workout=d.workout;
-      const nh={...base,[date]:updated};
-      saveUserData(user.id,nh);
-      setHistory(nh);
-      if(date===today) setTodayData(updated);
-      // Clean URL
-      window.history.replaceState({},"",window.location.pathname);
-    } catch(e){ console.error("Health sync error:",e); }
-  },[user.id]);
 
   // Schedule reminders via Service Worker
   useEffect(()=>{
@@ -1044,10 +1142,11 @@ function App({ user, onLogout }) {
       navigator.serviceWorker?.ready.then(reg=>{ if(reg.active) sendToSW(reg.active); });
     }
   },[user.id,lang]);
-  const persist=useCallback((date,nd)=>{ const nh={...history,[date]:nd}; setHistory(nh); saveUserData(user.id,nh); },[history,user.id]);
+  const persist=useCallback((date,nd)=>{ setHistory(h=>({...h,[date]:nd})); saveDayData(user.id,date,nd); },[user.id]);
   const updateMeal=(date,slotId,entry)=>{ const isT=date===today; const base=isT?todayData:(history[date]||{meals:{},workout:{},weight:""}); const nd={...base,meals:{...base.meals,[slotId]:entry}}; if(!entry)delete nd.meals[slotId]; if(isT)setTodayData(nd); persist(date,nd); };
   const updateStats=(date,stats)=>{ const isT=date===today; const base=isT?todayData:(history[date]||{meals:{},workout:{},weight:""}); const nd={...base,...stats}; if(isT)setTodayData(nd); persist(date,nd); };
-  const handleSaveSettings=async(newLang,newSkin)=>{ setLang(newLang); setSkinId(newSkin); setShowSettings(false); const users=loadUsers(); saveUsers(users.map(u=>u.id===user.id?{...u,lang:newLang,skin:newSkin}:u)); showToast(T[newLang].settingsSaved); };
+  const handleSaveGoals=g=>{ setGoals(g); saveGoals(user.id,g); };
+  const handleSaveSettings=async(newLang,newSkin)=>{ setLang(newLang); setSkinId(newSkin); setShowSettings(false); await updateUserPrefs(user.id,{lang:newLang,skin:newSkin}); showToast(T[newLang].settingsSaved); };
   const handleCalSelect=d=>{setShowCal(false);if(d===today)setTab("today");else{setTab("history");setHistoryDay(d);};};
   const dayKcal=Object.values(todayData.meals||{}).reduce((s,e)=>s+(e?.totals?.calories||0),0);
   const loggedCount=Object.values(todayData.meals||{}).filter(e=>e?.status==="done").length;
@@ -1057,7 +1156,7 @@ function App({ user, onLogout }) {
     <div style={{minHeight:"100vh",background:S.bg,fontFamily:"'DM Sans',sans-serif",color:S.text,paddingBottom:60,transition:"background 0.4s"}}>
       {toast&&<div style={{position:"fixed",bottom:28,left:"50%",transform:"translateX(-50%)",background:S.card,border:`1px solid ${S.accentBorder}`,color:S.accent,padding:"10px 22px",borderRadius:30,fontSize:13,zIndex:999,animation:"toastIn 0.3s ease",whiteSpace:"nowrap",boxShadow:"0 6px 24px rgba(0,0,0,0.5)"}}>{toast}</div>}
       {showCal&&<CalendarPicker history={history} onSelect={handleCalSelect} onClose={()=>setShowCal(false)} S={S} t={t} lang={lang}/>}
-      {showSettings&&<SettingsModal user={user} S={S} lang={lang} skinId={skinId} onSave={handleSaveSettings} onClose={()=>setShowSettings(false)}/>}
+      {showSettings&&<SettingsModal user={user} S={S} lang={lang} skinId={skinId} onSave={handleSaveSettings} onClose={()=>setShowSettings(false)} history={{...history,[today]:todayData}} goals={goals} onSaveGoals={handleSaveGoals}/>}
 
       {/* Header */}
       <div style={{padding:"24px 18px 0",borderBottom:`1px solid ${S.border}`}}>
@@ -1100,7 +1199,12 @@ function App({ user, onLogout }) {
 
       {/* Body */}
       <div style={{maxWidth:560,margin:"0 auto",padding:"16px 18px",animation:"fadeUp 0.35s ease"}}>
-        {tab==="today"&&<><DailyStats stats={{workout:todayData.workout,weight:todayData.weight}} onChange={s=>updateStats(today,s)} readOnly={false} S={S} t={t}/><MealGrid meals={todayData.meals} onUpdate={(id,e)=>updateMeal(today,id,e)} readOnly={false} isBackfill={false} S={S} t={t} lang={lang} userId={user.id}/></>}
+        {tab==="today"&&<>
+          <TodayHeader streak={calcStreak({...history,[today]:todayData})} kcal={dayKcal} loggedCount={loggedCount} goals={goals} S={S} t={t}/>
+          <DailyStats stats={{workout:todayData.workout,weight:todayData.weight}} onChange={s=>updateStats(today,s)} readOnly={false} S={S} t={t}/>
+          <MealGrid meals={todayData.meals} onUpdate={(id,e)=>updateMeal(today,id,e)} readOnly={false} isBackfill={false} S={S} t={t} lang={lang} userId={user.id}/>
+          {(()=>{const tot=Object.values(todayData.meals||{}).reduce((a,e)=>({calories:a.calories+(e?.totals?.calories||0),protein:a.protein+(e?.totals?.protein||0),carbs:a.carbs+(e?.totals?.carbs||0),fat:a.fat+(e?.totals?.fat||0),fibre:a.fibre+(e?.totals?.fibre||0)}),{calories:0,protein:0,carbs:0,fat:0,fibre:0}); return <GoalsProgress totals={tot} goals={goals} S={S} t={t}/>;})()}
+        </>}
         {tab==="week"&&<WeekView history={history} S={S} t={t} lang={lang}/>}
         {tab==="history"&&!historyDay&&<>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
