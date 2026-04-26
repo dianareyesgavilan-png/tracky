@@ -2,7 +2,10 @@
   "mcpServers": {
     "supabase": {
       "type": "http",
-      "url": "https://mcp.supabase.com/mcp?project_ref=wqbznwgepcmecyflmtar"
+      "url": "https://mcp.supabase.com/mcp?project_ref=wqbznwgepcmecyflmtar",
+      "headers": {
+        "Authorization": "Bearer sbp_dd566ecb5a8919412c5712c71830fefdc4a147f6"
+      }
     }
   }
 }
