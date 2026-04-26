@@ -1237,22 +1237,109 @@ function importBackup(file, userId, onSuccess, onError) {
   r.readAsText(file);
 }
 
+/* ═══ PDF RANGE MODAL ════════════════════════════════════════════════════ */
+function PDFRangeModal({ history, today, onClose, userName, lang, S, t }) {
+  const [range,setRange]=useState("7");
+  const [from,setFrom]=useState(()=>{const d=new Date();d.setDate(d.getDate()-6);return isoDate(d);});
+  const [to,setTo]=useState(today);
+  const weekStart=getWeekDays(today)[0];
+  const opts=lang==="es"
+    ?[["week","Esta semana"],["7","Últimos 7 días"],["month","Último mes"],["all","Todo"],["custom","Personalizado"]]
+    :[["week","This week"],["7","Last 7 days"],["month","Last month"],["all","All time"],["custom","Custom"]];
+  const filtered=()=>{
+    let f,t2;
+    if(range==="week"){f=weekStart;t2=today;}
+    else if(range==="7"){const d=new Date();d.setDate(d.getDate()-6);f=isoDate(d);t2=today;}
+    else if(range==="month"){const d=new Date();d.setDate(d.getDate()-29);f=isoDate(d);t2=today;}
+    else if(range==="all"){f="2000-01-01";t2=today;}
+    else{f=from;t2=to;}
+    return Object.fromEntries(Object.entries(history).filter(([d])=>d>=f&&d<=t2));
+  };
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.72)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:400,padding:20}} onClick={onClose}>
+      <div style={{background:S.card,borderRadius:20,width:"100%",maxWidth:360,padding:"22px 20px 24px",border:`1px solid ${S.border}`}} onClick={e=>e.stopPropagation()}>
+        <div style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:16,fontWeight:800,color:S.text,marginBottom:16}}>📄 {lang==="es"?"Generar PDF":"Generate PDF"}</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:16}}>
+          {opts.map(([key,label])=>(
+            <button key={key} onClick={()=>setRange(key)} style={{background:range===key?S.accentDim:S.surface,border:`1px solid ${range===key?S.accentBorder:S.border}`,borderRadius:20,padding:"7px 14px",fontSize:12,fontWeight:range===key?600:400,color:range===key?S.accent:S.textMuted,cursor:"pointer",transition:"all 0.15s"}}>{label}</button>
+          ))}
+        </div>
+        {range==="custom"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+          <div>
+            <div style={{fontSize:10,color:S.textMuted,marginBottom:4}}>{lang==="es"?"Desde":"From"}</div>
+            <input type="date" value={from} onChange={e=>setFrom(e.target.value)} max={to} style={{width:"100%",background:S.surface,border:`1px solid ${S.border}`,borderRadius:9,padding:"8px 10px",color:S.text,fontSize:12,outline:"none",colorScheme:"dark"}}/>
+          </div>
+          <div>
+            <div style={{fontSize:10,color:S.textMuted,marginBottom:4}}>{lang==="es"?"Hasta":"To"}</div>
+            <input type="date" value={to} onChange={e=>setTo(e.target.value)} min={from} max={today} style={{width:"100%",background:S.surface,border:`1px solid ${S.border}`,borderRadius:9,padding:"8px 10px",color:S.text,fontSize:12,outline:"none",colorScheme:"dark"}}/>
+          </div>
+        </div>}
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={()=>{buildPDF(filtered(),userName,lang);onClose();}} style={{flex:1,background:S.accent,color:S.bg,border:"none",borderRadius:11,padding:"12px 0",fontSize:13,fontWeight:700,cursor:"pointer"}}>{lang==="es"?"Generar PDF ↗":"Generate PDF ↗"}</button>
+          <button onClick={onClose} style={{padding:"12px 14px",background:S.surface,color:S.textMuted,border:`1px solid ${S.border}`,borderRadius:11,fontSize:13,cursor:"pointer"}}>{t.cancel}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ═══ PDF ════════════════════════════════════════════════════════════════ */
 function buildPDF(history, userName, lang) {
   const t=T[lang]; const slots=getMealSlots(lang);
   const entries=Object.entries(history).sort(([a],[b])=>a.localeCompare(b));
-  const mBar=(tot)=>{ if(!tot)return""; const tt=tot.protein+tot.carbs+tot.fat; if(!tt)return""; const p=Math.round(tot.protein/tt*100),c=Math.round(tot.carbs/tt*100),f=Math.round(tot.fat/tt*100); return `<div style="margin-top:4px"><div style="display:flex;height:5px;border-radius:3px;overflow:hidden;gap:1px;width:130px"><div style="width:${p}%;background:#f4845f"></div><div style="width:${c}%;background:#f6c954"></div><div style="width:${f}%;background:#4db849"></div></div><div style="font-size:9px;color:#888;margin-top:2px"><span style="color:#f4845f">${tot.protein}g P</span> · <span style="color:#a07800">${tot.carbs}g C</span> · <span style="color:#2d7a3a">${tot.fat}g F</span>${tot.fibre?` · <span style="color:#1a4488">${tot.fibre}g Fi</span>`:""}</div></div>`; };
+  const ml=(tot)=>{
+    if(!tot?.calories) return "";
+    return `<span style="font-weight:700;font-family:monospace;color:#1a3a2a">${tot.calories} kcal</span>`
+      +(tot.protein?` &nbsp;·&nbsp; <span style="color:#c0392b">${tot.protein}g P</span>`:"")
+      +(tot.carbs?` &nbsp;·&nbsp; <span style="color:#d4ac0d">${tot.carbs}g C</span>`:"")
+      +(tot.fat?` &nbsp;·&nbsp; <span style="color:#27ae60">${tot.fat}g G</span>`:"")
+      +(tot.fibre?` &nbsp;·&nbsp; <span style="color:#2980b9">${tot.fibre}g Fi</span>`:"");
+  };
   const dayBlocks=entries.map(([date,day])=>{
     const dTot={calories:0,protein:0,carbs:0,fat:0,fibre:0};
-    const rows=slots.map(s=>{ const e=day.meals?.[s.id]; if(!e||e.status!=="done")return`<tr class="er"><td>${s.icon} ${s.label}</td><td class="mu">—</td><td class="mu">—</td><td></td></tr>`; const tot=e.totals||{}; if(tot.calories){dTot.calories+=tot.calories||0;dTot.protein+=tot.protein||0;dTot.carbs+=tot.carbs||0;dTot.fat+=tot.fat||0;dTot.fibre+=tot.fibre||0;} const iR=(e.ingredients||[]).map(i=>`<div style="display:flex;justify-content:space-between;font-size:10px;color:#555;margin-top:2px;border-bottom:1px dotted #eee;padding:1px 0"><span>${i.name}</span><span style="font-family:monospace;color:#888">${i.calories}kcal <span style="color:#f4845f">${i.protein}P</span> <span style="color:#a07800">${i.carbs}C</span> <span style="color:#2d7a3a">${i.fat}F</span></span></div>`).join(""); const photos=(e.photos||[]).slice(0,3).filter(p=>p.base64||p.url).map(p=>{const src=p.url||`data:image/jpeg;base64,${p.base64}`;return`<img src="${src}" style="width:80px;height:60px;object-fit:cover;border-radius:6px;margin:2px;border:1px solid #eee;display:inline-block;vertical-align:top"/>`;}).join(""); return `<tr><td class="bo">${s.icon} ${s.label}<br><span style="font-size:10px;color:#2d7a3a;font-family:monospace">${e.timestamp||""}</span></td><td>${e.photos?.[0]?.description?`<div style="font-size:11px;color:#555;font-style:italic;margin-bottom:4px">${e.photos[0].description}</div>`:""}${iR}${e.notes?`<div style="font-size:10px;color:#999;margin-top:4px">"${e.notes}"</div>`:""}</td><td>${tot.calories?`<div style="font-size:13px;font-weight:700;color:#1a3a2a;font-family:monospace">${tot.calories} kcal</div>${mBar(tot)}`:"—"}</td><td>${photos}</td></tr>`; }).join("");
+    const cards=slots.map(s=>{
+      const e=day.meals?.[s.id]; if(!e||e.status!=="done") return "";
+      const tot=e.totals||{};
+      if(tot.calories){dTot.calories+=tot.calories||0;dTot.protein+=tot.protein||0;dTot.carbs+=tot.carbs||0;dTot.fat+=tot.fat||0;dTot.fibre+=tot.fibre||0;}
+      const photos=(e.photos||[]).filter(p=>p.base64||p.url).slice(0,4)
+        .map(p=>{const src=p.url||`data:image/jpeg;base64,${p.base64}`;return`<img src="${src}" style="width:160px;height:120px;object-fit:cover;border-radius:8px;border:1px solid #e8e8e8"/>`;}).join("");
+      const desc=e.photos?.[0]?.description||"";
+      const ings=(e.ingredients||[]).length?`<div style="font-size:10px;color:#777;margin-top:6px;line-height:1.7">${e.ingredients.map(i=>`${i.name}<span style="color:#aaa"> (${i.calories} kcal)</span>`).join(" &nbsp;·&nbsp; ")}</div>`:"";
+      const notesTxt=e.notes?`<div style="font-size:10px;color:#999;font-style:italic;margin-top:4px">"${e.notes}"</div>`:"";
+      return `<div style="margin-bottom:18px;padding:14px;background:#fafafa;border-radius:10px;border:1px solid #efefef">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+          <div style="font-size:13px;font-weight:700;color:#1a3a2a">${s.icon} ${s.label}${e.timestamp?`<span style="font-size:10px;font-weight:400;color:#aaa;margin-left:8px">${e.timestamp}</span>`:""}</div>
+          <div style="font-size:12px">${ml(tot)}</div>
+        </div>
+        ${photos?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:${desc||ings?10:0}px">${photos}</div>`:""}
+        ${desc?`<div style="font-size:11px;color:#555;font-style:italic">${desc}</div>`:""}
+        ${ings}${notesTxt}
+      </div>`;
+    }).filter(Boolean).join("");
+    if(!cards) return "";
     const w=day.workout; const wt=day.weight;
-    const wRow=w?.type?`<tr style="background:#fffbf0"><td colspan="4" style="font-size:11px;padding:5px 10px;color:#774400">🏋️ <b>${w.type}</b>${w.duration?` · ${w.duration}min`:""}${w.time?` · ${w.time}`:""}${w.intensity?` · ${w.intensity}`:""}</td></tr>`:"";
-    const wtRow=wt?`<tr style="background:#f0f5ff"><td colspan="4" style="font-size:11px;padding:5px 10px;color:#224488">⚖️ ${t.weight}: <b>${wt} ${t.kg}</b></td></tr>`:"";
-    const totRow=dTot.calories?`<tr style="background:#edf7ea;border-top:2px solid #c8e6c0"><td colspan="2" style="text-align:right;font-weight:700;font-size:11px;color:#1a3a2a;padding:6px 10px">${t.dailyTotal}</td><td style="padding:6px 10px"><div style="font-size:14px;font-weight:700;color:#1a3a2a;font-family:monospace">${dTot.calories} kcal</div>${mBar(dTot)}</td><td></td></tr>`:"";
-    return `<div style="margin-bottom:32px;page-break-inside:avoid"><h3 style="font-size:15px;color:#1a3a2a;border-bottom:2px solid #c8e6c0;padding-bottom:6px;margin-bottom:8px;text-transform:capitalize">${fmtFull(date,lang)}</h3><table style="width:100%;border-collapse:collapse;font-size:12px;font-family:Helvetica,Arial,sans-serif"><thead><tr style="background:#edf7ea"><th style="padding:6px 10px;text-align:left;color:#1a3a2a;font-size:10px;text-transform:uppercase;letter-spacing:.8px;width:110px">${lang==="es"?"Comida":"Meal"}</th><th style="padding:6px 10px;text-align:left;color:#1a3a2a;font-size:10px;text-transform:uppercase;letter-spacing:.8px">${lang==="es"?"Ingredientes":"Ingredients"}</th><th style="padding:6px 10px;text-align:left;color:#1a3a2a;font-size:10px;text-transform:uppercase;letter-spacing:.8px;width:155px">Macros</th><th style="padding:6px 10px;text-align:left;color:#1a3a2a;font-size:10px;text-transform:uppercase;letter-spacing:.8px;width:175px">${lang==="es"?"Fotos":"Photos"}</th></tr></thead><tbody>${rows}${wRow}${wtRow}${totRow}</tbody></table></div>`;
-  }).join("");
-  const tot=entries.length; const meals=entries.reduce((s,[,d])=>s+Object.values(d.meals||{}).filter(e=>e?.status==="done").length,0); const wDays=entries.filter(([,d])=>d.workout?.type).length;
-  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Tracky. — ${userName}</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Georgia,serif;color:#111;padding:44px 48px;max-width:920px;margin:0 auto;font-size:13px;line-height:1.5}h1{font-family:'Plus Jakarta Sans',Helvetica,sans-serif;font-size:30px;font-weight:900;letter-spacing:-1.5px;color:#1a3a2a;margin-bottom:3px}h1 span{color:#2d7a3a}.sub{color:#777;font-size:12px;margin-bottom:12px;font-family:Helvetica,sans-serif}.stats{display:flex;gap:16px;margin-bottom:16px}.sb{background:#edf7ea;border:1px solid #c8e6c0;border-radius:8px;padding:10px 16px;text-align:center}.sb .n{font-size:22px;font-weight:bold;color:#1a3a2a;font-family:'Courier New',monospace}.sb .l{font-size:10px;color:#666;font-family:Helvetica,sans-serif;text-transform:uppercase;letter-spacing:.5px;margin-top:2px}hr{border:none;border-top:2px solid #c8e6c0;margin-bottom:28px}.actions{display:flex;gap:10px;margin-bottom:28px}button.pb{background:#1a3a2a;color:white;border:none;padding:9px 22px;border-radius:6px;cursor:pointer;font-size:13px;font-family:Helvetica,sans-serif}button.back{background:#f4f4f4;color:#333;border:1px solid #ccc}td{padding:8px 10px;vertical-align:top;border-bottom:1px solid #f0f0f0}tr:last-child td{border-bottom:none}tr:nth-child(even) td{background:#fafff9}.er td{color:#bbb}.bo{font-weight:600;color:#222}.mu{color:#bbb}@media print{.actions{display:none}}</style></head><body><h1>Tracky<span>.</span></h1><p class="sub">${userName} · ${new Date().toLocaleDateString(lang==="es"?"es-AR":"en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</p><div class="stats"><div class="sb"><div class="n">${tot}</div><div class="l">${t.days}</div></div><div class="sb"><div class="n">${meals}</div><div class="l">${t.mealsLogged}</div></div><div class="sb"><div class="n">${wDays}</div><div class="l">${t.workoutDays}</div></div></div><div class="actions"><button class="pb back" onclick="window.close()">← ${t.back}</button><button class="pb" onclick="window.print()">🖨 ${t.printPdf}</button></div><hr/>${dayBlocks||`<p style="color:#aaa">${t.noHistory}</p>`}</body></html>`;
+    const meta=[wt?`⚖️ ${wt} kg`:"",w?.type?`🏋️ ${w.type}${w.duration?` · ${w.duration}min`:""}${w.intensity?` · ${w.intensity}`:""}`:""].filter(Boolean).join(" &nbsp;·&nbsp; ");
+    return `<div style="margin-bottom:40px;page-break-inside:avoid">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;border-bottom:3px solid #1a3a2a;padding-bottom:8px;margin-bottom:14px">
+        <div style="font-size:17px;font-weight:800;color:#1a3a2a;text-transform:capitalize">${fmtFull(date,lang)}</div>
+        ${meta?`<div style="font-size:11px;color:#666">${meta}</div>`:""}
+      </div>
+      ${cards}
+      ${dTot.calories?`<div style="background:#edf7ea;border:1px solid #c8e6c0;border-radius:8px;padding:10px 14px;margin-top:6px"><span style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#1a3a2a;font-weight:600">${t.dailyTotal} &nbsp;&nbsp;</span>${ml(dTot)}</div>`:""}
+    </div>`;
+  }).filter(Boolean).join("");
+  const nDays=entries.length;
+  const nMeals=entries.reduce((s,[,d])=>s+Object.values(d.meals||{}).filter(e=>e?.status==="done").length,0);
+  const nWork=entries.filter(([,d])=>d.workout?.type).length;
+  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Tracky. — ${userName}</title>
+  <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,Helvetica,Arial,sans-serif;color:#111;padding:40px 48px;max-width:840px;margin:0 auto;line-height:1.5}h1{font-size:30px;font-weight:900;letter-spacing:-1.5px;color:#1a3a2a}h1 span{color:#2d7a3a}.sub{color:#888;font-size:12px;margin:3px 0 16px}.stats{display:flex;gap:12px;margin-bottom:20px}.sb{background:#edf7ea;border:1px solid #c8e6c0;border-radius:10px;padding:10px 18px;text-align:center}.sb .n{font-size:22px;font-weight:800;color:#1a3a2a;font-family:monospace}.sb .l{font-size:10px;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-top:2px}.actions{display:flex;gap:10px;margin-bottom:28px}button{background:#1a3a2a;color:#fff;border:none;padding:9px 22px;border-radius:7px;cursor:pointer;font-size:13px}button.back{background:#f0f0f0;color:#333;border:1px solid #ccc}hr{border:none;border-top:1px solid #e0e0e0;margin-bottom:28px}@media print{.actions{display:none}}</style>
+  </head><body>
+  <h1>Tracky<span>.</span></h1>
+  <p class="sub">${userName} · ${new Date().toLocaleDateString(lang==="es"?"es-AR":"en-US",{year:"numeric",month:"long",day:"numeric"})}</p>
+  <div class="stats"><div class="sb"><div class="n">${nDays}</div><div class="l">${t.days}</div></div><div class="sb"><div class="n">${nMeals}</div><div class="l">${t.mealsLogged}</div></div><div class="sb"><div class="n">${nWork}</div><div class="l">${t.workoutDays}</div></div></div>
+  <div class="actions"><button class="back" onclick="window.close()">← ${t.back}</button><button onclick="window.print()">🖨 ${t.printPdf}</button></div>
+  <hr/>${dayBlocks||`<p style="color:#aaa">${t.noHistory}</p>`}
+  </body></html>`;
   const win=window.open("","_blank"); if(win){win.document.write(html);win.document.close();}
 }
 
@@ -1267,6 +1354,7 @@ function App({ user, onLogout }) {
   const [showCal,setShowCal]=useState(false);
   const [backupMsg,setBackupMsg]=useState("");
   const [showSettings,setShowSettings]=useState(false);
+  const [showPDF,setShowPDF]=useState(false);
   const [toast,setToast]=useState(null);
   const [goals,setGoals]=useState(()=>loadGoals(user.id));
   const [showOnboarding,setShowOnboarding]=useState(()=>!loadGoals(user.id));
@@ -1325,6 +1413,7 @@ function App({ user, onLogout }) {
     <div style={{minHeight:"100vh",background:S.bg,fontFamily:"'DM Sans',sans-serif",color:S.text,paddingBottom:60,transition:"background 0.4s"}}>
       {toast&&<div style={{position:"fixed",bottom:28,left:"50%",transform:"translateX(-50%)",background:S.card,border:`1px solid ${S.accentBorder}`,color:S.accent,padding:"10px 22px",borderRadius:30,fontSize:13,zIndex:999,animation:"toastIn 0.3s ease",whiteSpace:"nowrap",boxShadow:"0 6px 24px rgba(0,0,0,0.5)"}}>{toast}</div>}
       {showCal&&<CalendarPicker history={history} onSelect={handleCalSelect} onClose={()=>setShowCal(false)} S={S} t={t} lang={lang}/>}
+      {showPDF&&<PDFRangeModal history={{...history,[today]:todayData}} today={today} onClose={()=>setShowPDF(false)} userName={user.name} lang={lang} S={S} t={t}/>}
       {showOnboarding&&<OnboardingModal user={user} S={S} t={t} onComplete={handleOnboardingComplete} onSkip={()=>setShowOnboarding(false)}/>}
       {showSettings&&<SettingsModal user={user} S={S} lang={lang} skinId={skinId} onSave={handleSaveSettings} onClose={()=>setShowSettings(false)} history={{...history,[today]:todayData}} goals={goals} onSaveGoals={handleSaveGoals} onRecalc={()=>{setShowOnboarding(true);setShowSettings(false);}}/>}
 
@@ -1341,7 +1430,7 @@ function App({ user, onLogout }) {
             </div>
             <div style={{display:"flex",gap:6,alignItems:"center"}}>
               <button onClick={()=>setShowCal(true)} style={{background:S.surface,border:`1px solid ${S.border}`,color:S.textMuted,borderRadius:9,padding:"5px 9px",fontSize:13,cursor:"pointer"}}>📅</button>
-              <button onClick={()=>buildPDF({...history,[today]:todayData},user.name,lang)} style={{background:S.accentDim,border:`1px solid ${S.accentBorder}`,color:S.accent,borderRadius:9,padding:"5px 11px",fontSize:12,cursor:"pointer",fontWeight:600}}>{t.pdfExport}</button>
+              <button onClick={()=>setShowPDF(true)} style={{background:S.accentDim,border:`1px solid ${S.accentBorder}`,color:S.accent,borderRadius:9,padding:"5px 11px",fontSize:12,cursor:"pointer",fontWeight:600}}>{t.pdfExport}</button>
               <label title={t.restoreBackup} style={{background:S.surface,border:`1px solid ${S.border}`,color:S.textMuted,borderRadius:9,padding:"5px 9px",fontSize:13,cursor:"pointer",display:"flex",alignItems:"center"}}>
                 💾
                 <input type="file" accept=".json" style={{display:"none"}} onChange={e=>{
@@ -1386,7 +1475,7 @@ function App({ user, onLogout }) {
         {tab==="history"&&historyDay&&<div>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
             <button onClick={()=>setHistoryDay(null)} style={{background:"none",border:"none",color:S.accent,cursor:"pointer",fontSize:13,padding:0}}>← {t.back}</button>
-            <button onClick={()=>buildPDF({[historyDay]:history[historyDay]||{}},user.name,lang)} style={{background:S.accentDim,border:`1px solid ${S.accentBorder}`,color:S.accent,borderRadius:9,padding:"5px 12px",fontSize:12,cursor:"pointer",fontWeight:600}}>{t.pdfExport}</button>
+            <button onClick={()=>buildPDF({[historyDay]:history[historyDay]||{}},user.name,lang)} style={{background:S.accentDim,border:`1px solid ${S.accentBorder}`,color:S.accent,borderRadius:9,padding:"5px 12px",fontSize:12,cursor:"pointer",fontWeight:600}}>📄 {t.pdfExport}</button>
           </div>
           <h2 style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:17,fontWeight:800,color:S.text,margin:"0 0 14px",textTransform:"capitalize"}}>{fmtFull(historyDay,lang)}</h2>
           {historyDay<today&&<div style={{fontSize:11,color:S.orange,background:"rgba(255,180,80,0.08)",border:"1px solid rgba(255,180,80,0.18)",borderRadius:8,padding:"6px 12px",marginBottom:14}}>✏️ {t.editPastEntry}</div>}
