@@ -87,6 +87,17 @@ const T = {
     editHint:"Tap any value to adjust", startTracking:"Start tracking!",
     skipOnboard:"Skip for now", recalcGoals:"Recalculate goals", years:"yrs", heightUnit:"cm",
     next:"Next →", logout:"Log out",
+    profileComplete:"Profile set ✓", profileMissing:"Profile not set",
+    profileMissingHint:"Complete your profile to auto-calculate daily goals",
+    setupProfile:"Set up profile", managePresets:"Manage Presets",
+    appleHealth:"Apple Health", healthLinked:"Linked ✓", healthMissing:"Not configured",
+    howToLink:"Setup", healthSetupTitle:"Link via iOS Shortcuts",
+    healthSetupStep1:"1. Open the Shortcuts app on your iPhone",
+    healthSetupStep2:"2. Create a Personal Automation (runs daily)",
+    healthSetupStep3:"3. Add: Get Health Samples → Weight & Workouts",
+    healthSetupStep4:"4. Run Script → encode & open Tracky with ?health=<data>",
+    healthSetupHint:"Your user ID (needed for the Shortcut):", healthCopy:"Copy",
+    presetSlots:"Applies to slots",
   },
   es: {
     appTagline:"diario de comidas", today:"Hoy", week:"Semana", history:"Historial",
@@ -143,6 +154,17 @@ const T = {
     editHint:"Tocá cualquier valor para ajustar", startTracking:"¡Empezar!",
     skipOnboard:"Saltar por ahora", recalcGoals:"Recalcular metas", years:"años", heightUnit:"cm",
     next:"Siguiente →", logout:"Cerrar sesión",
+    profileComplete:"Perfil configurado ✓", profileMissing:"Perfil sin configurar",
+    profileMissingHint:"Completá tu perfil para calcular tus metas automáticamente",
+    setupProfile:"Configurar perfil", managePresets:"Gestionar Presets",
+    appleHealth:"Apple Health", healthLinked:"Vinculado ✓", healthMissing:"Sin configurar",
+    howToLink:"Configurar", healthSetupTitle:"Vincular con iOS Atajos",
+    healthSetupStep1:"1. Abrí la app Atajos en tu iPhone",
+    healthSetupStep2:"2. Creá una Automatización Personal (se ejecuta diario)",
+    healthSetupStep3:"3. Agrega: Obtener muestras de salud → Peso y Entrenamientos",
+    healthSetupStep4:"4. Ejecutar script → codificar y abrir Tracky con ?health=<dato>",
+    healthSetupHint:"Tu ID de usuario (necesario para el Atajo):", healthCopy:"Copiar",
+    presetSlots:"Aplica a slots",
   },
 };
 
@@ -462,8 +484,61 @@ function OnboardingModal({ user, S, t, onComplete, onSkip }) {
   );
 }
 
+/* ═══ PRESETS MANAGER ═══════════════════════════════════════════════════ */
+function PresetsManager({ userId, S, t, lang, onClose }) {
+  const [presets,setPresets]=useState([]);
+  const [tags,setTags]=useState(()=>{ try{return JSON.parse(localStorage.getItem(`tracky-preset-tags-${userId}`)||"{}");}catch{return{};} });
+  const slots=getMealSlots(lang);
+  useEffect(()=>{ getPresets(userId).then(ps=>setPresets(ps.map(p=>({...p,slotId:p.slot_id||p.slotId})))); },[userId]);
+  const saveTags=t=>{ setTags(t); localStorage.setItem(`tracky-preset-tags-${userId}`,JSON.stringify(t)); };
+  const toggleTag=(presetId,slotId)=>{
+    const cur=tags[presetId]||[]; const next=cur.includes(slotId)?cur.filter(s=>s!==slotId):[...cur,slotId];
+    saveTags({...tags,[presetId]:next});
+  };
+  const getEffective=(preset)=>[...new Set([...(preset.slotId?[preset.slotId]:[]),...(tags[preset.id]||[])])];
+  const handleDelete=async(preset)=>{
+    setPresets(ps=>ps.filter(p=>p.id!==preset.id));
+    if(preset.id) await dbDeletePreset(preset.id);
+    const nt={...tags}; delete nt[preset.id]; saveTags(nt);
+  };
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:500,padding:"0"}} onClick={onClose}>
+      <div style={{background:S.card,borderRadius:"20px 20px 0 0",width:"100%",maxWidth:480,maxHeight:"88vh",overflow:"auto",border:`1px solid ${S.border}`,borderBottom:"none"}} onClick={e=>e.stopPropagation()}>
+        <div style={{padding:"16px 18px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:`1px solid ${S.border}`,position:"sticky",top:0,background:S.card,zIndex:1}}>
+          <div style={{fontSize:15,fontWeight:700,color:S.text}}>📋 {t.managePresets}</div>
+          <button onClick={onClose} style={{background:"none",border:"none",color:S.textMuted,fontSize:22,cursor:"pointer",padding:"0 2px",lineHeight:1}}>×</button>
+        </div>
+        <div style={{padding:"12px 16px 32px"}}>
+          {presets.length===0
+            ?<div style={{textAlign:"center",color:S.textMuted,fontSize:13,padding:"30px 0"}}>{t.noPresets}</div>
+            :presets.map(preset=>(
+            <div key={preset.id} style={{marginBottom:12,padding:"12px 14px",background:S.surface,border:`1px solid ${S.border}`,borderRadius:13}}>
+              <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:10}}>
+                <div>
+                  <div style={{fontSize:14,fontWeight:700,color:S.text}}>{preset.name}</div>
+                  <div style={{fontSize:11,color:S.textMuted,marginTop:2}}>{preset.totals?.calories||0} kcal · {preset.ingredients?.length||0} {lang==="es"?"ingredientes":"ingredients"}</div>
+                </div>
+                <button onClick={()=>handleDelete(preset)} style={{background:"rgba(255,80,80,0.08)",border:"1px solid rgba(255,80,80,0.2)",color:"rgba(255,80,80,0.7)",borderRadius:8,padding:"4px 8px",fontSize:12,cursor:"pointer",flexShrink:0}}>×</button>
+              </div>
+              <div style={{fontSize:10,color:S.textMuted,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>{t.presetSlots}</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                {slots.map(slot=>{ const active=getEffective(preset).includes(slot.id); return (
+                  <button key={slot.id} onClick={()=>toggleTag(preset.id,slot.id)} style={{padding:"4px 10px",borderRadius:20,border:`1px solid ${active?S.accentBorder:S.border}`,background:active?S.accentDim:"transparent",color:active?S.accent:S.textMuted,fontSize:11,fontWeight:active?600:400,cursor:"pointer"}}>
+                    {slot.icon} {slot.label}
+                  </button>
+                ); })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ═══ SETTINGS MODAL ════════════════════════════════════════════════════ */
-function SettingsModal({ user, S, lang, skinId, onSave, onClose, history, goals, onSaveGoals, onRecalc, onLogout }) {
+function SettingsModal({ user, S, lang, skinId, onSave, onClose, history, goals, onSaveGoals, onRecalc, onLogout, onOpenPresets }) {
+  const [activeTab,setActiveTab]=useState("perfil");
   const [selLang,setSelLang]=useState(lang);
   const [selSkin,setSelSkin]=useState(skinId);
   const [selGoals,setSelGoals]=useState(goals||DEFAULT_GOALS);
@@ -471,8 +546,8 @@ function SettingsModal({ user, S, lang, skinId, onSave, onClose, history, goals,
   const t=T[selLang]; const PS=SKINS[selSkin];
   const slots=getMealSlots(selLang);
   const defaultReminders=slots.reduce((a,s)=>({...a,[s.id]:{enabled:true,time:`${String(s.rH).padStart(2,"0")}:${String(s.rM+30).padStart(2,"0")}`}}),{});
-  const saved=JSON.parse(localStorage.getItem(`tracky-reminders-${user.id}`)||"null");
-  const [reminders,setReminders]=useState(saved||defaultReminders);
+  const savedRem=JSON.parse(localStorage.getItem(`tracky-reminders-${user.id}`)||"null");
+  const [reminders,setReminders]=useState(savedRem||defaultReminders);
   const [notifStatus,setNotifStatus]=useState(Notification?.permission||"default");
   const toggleSlot=id=>setReminders(r=>({...r,[id]:{...r[id],enabled:!r[id]?.enabled}}));
   const setTime=(id,time)=>setReminders(r=>({...r,[id]:{...r[id],time}}));
@@ -483,79 +558,145 @@ function SettingsModal({ user, S, lang, skinId, onSave, onClose, history, goals,
     if(perm==="granted"){localStorage.setItem(`tracky-reminders-${user.id}`,JSON.stringify(reminders));alert(t.reminderSet);const sw=navigator.serviceWorker?.controller;if(sw)sw.postMessage({type:"SCHEDULE_REMINDERS",reminders,lang:user.lang||"es"});}
     else alert(t.reminderBlocked);
   };
+  const profile=loadProfile(user.id);
+  const healthLinked=!!localStorage.getItem(`tracky-health-linked-${user.id}`);
+  const [showHealthInstr,setShowHealthInstr]=useState(false);
+  const [copied,setCopied]=useState(false);
+  const copyId=()=>{ navigator.clipboard?.writeText(user.id).then(()=>{ setCopied(true); setTimeout(()=>setCopied(false),2000); }); };
+  const doSave=()=>{ localStorage.setItem(`tracky-reminders-${user.id}`,JSON.stringify(reminders)); const sw=navigator.serviceWorker?.controller; if(sw)sw.postMessage({type:"SCHEDULE_REMINDERS",reminders,lang:selLang}); onSaveGoals(selGoals); onSave(selLang,selSkin); };
+  const TABS=[["perfil",lang==="es"?"Perfil":"Profile"],["salud",lang==="es"?"Salud":"Health"],["avisos",lang==="es"?"Avisos":"Alerts"],["datos",lang==="es"?"Datos":"Data"]];
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.82)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:400,padding:16}} onClick={onClose}>
-      <div style={{background:S.card,borderRadius:20,width:"100%",maxWidth:380,maxHeight:"92vh",overflow:"auto",padding:"22px 20px 26px",border:`1px solid ${S.border}`}} onClick={e=>e.stopPropagation()}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
-          <Wordmark S={PS} size={22}/>
-          <div style={{fontSize:13,color:S.textMuted}}>{user.name}</div>
+      <div style={{background:S.card,borderRadius:20,width:"100%",maxWidth:380,maxHeight:"92vh",overflow:"auto",border:`1px solid ${S.border}`}} onClick={e=>e.stopPropagation()}>
+        {/* Header */}
+        <div style={{padding:"16px 18px 0",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <Wordmark S={PS} size={20}/>
+          <div style={{fontSize:11,color:S.textMuted}}>{user.name}</div>
         </div>
-        {/* Language */}
-        <div style={{marginBottom:18}}>
-          <div style={{fontSize:10,color:S.textMuted,textTransform:"uppercase",letterSpacing:1.5,marginBottom:8}}>{t.language}</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            {[["en","🇺🇸 English"],["es","🇦🇷 Español"]].map(([code,label])=>(
-              <button key={code} onClick={()=>setSelLang(code)} style={{padding:"11px 0",borderRadius:11,border:`1px solid ${selLang===code?PS.accentBorder:S.border}`,background:selLang===code?PS.accentDim:"transparent",color:selLang===code?PS.accent:S.textMuted,fontSize:13,fontWeight:selLang===code?600:400,cursor:"pointer",transition:"all 0.15s"}}>{label}</button>
-            ))}
-          </div>
+        {/* Tabs */}
+        <div style={{display:"flex",borderBottom:`1px solid ${S.border}`,margin:"12px 0 0"}}>
+          {TABS.map(([key,label])=>(
+            <button key={key} onClick={()=>setActiveTab(key)} style={{flex:1,padding:"9px 0",fontSize:11,fontWeight:activeTab===key?700:400,border:"none",borderBottom:activeTab===key?`2px solid ${S.accent}`:"2px solid transparent",background:"transparent",color:activeTab===key?S.accent:S.textMuted,cursor:"pointer",transition:"all 0.2s"}}>{label}</button>
+          ))}
         </div>
-        {/* Skin */}
-        <div style={{marginBottom:22}}>
-          <div style={{fontSize:10,color:S.textMuted,textTransform:"uppercase",letterSpacing:1.5,marginBottom:8}}>{t.skin}</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            {Object.values(SKINS).map(sk=>(
-              <button key={sk.id} onClick={()=>setSelSkin(sk.id)} style={{padding:"11px 12px",borderRadius:11,border:`1px solid ${selSkin===sk.id?sk.accentBorder:S.border}`,background:selSkin===sk.id?sk.accentDim:"transparent",cursor:"pointer",display:"flex",alignItems:"center",gap:8,transition:"all 0.15s"}}>
-                <div style={{width:16,height:16,borderRadius:"50%",background:sk.accent,flexShrink:0,boxShadow:selSkin===sk.id?`0 0 8px ${sk.accent}60`:"none"}}/>
-                <span style={{fontSize:11,fontWeight:selSkin===sk.id?600:400,color:selSkin===sk.id?sk.accent:S.textMuted}}>{lang==="es"?sk.nameEs:sk.name}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-        {/* Reminders */}
-        <div style={{marginBottom:18}}>
-          <div style={{fontSize:10,color:S.textMuted,textTransform:"uppercase",letterSpacing:1.5,marginBottom:4}}>{t.reminders}</div>
-          <div style={{fontSize:11,color:S.textMuted,marginBottom:10}}>{t.remindersHint}</div>
-          <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            {slots.map(s=>(
-              <div key={s.id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:reminders[s.id]?.enabled?PS.accentDim:S.surface,border:`1px solid ${reminders[s.id]?.enabled?PS.accentBorder:S.border}`,borderRadius:10,transition:"all 0.15s"}}>
-                <span style={{fontSize:14}}>{s.icon}</span>
-                <div style={{flex:1,fontSize:12,color:reminders[s.id]?.enabled?PS.accent:S.textMuted,fontWeight:reminders[s.id]?.enabled?600:400}}>{s.label}</div>
-                <input type="time" value={reminders[s.id]?.time||"09:00"} onChange={e=>setTime(s.id,e.target.value)} style={{background:"rgba(255,255,255,0.06)",border:"none",color:PS.accent,fontSize:11,borderRadius:6,padding:"3px 6px",outline:"none",colorScheme:"dark",opacity:reminders[s.id]?.enabled?1:0.3}}/>
-                <div onClick={()=>toggleSlot(s.id)} style={{width:32,height:18,borderRadius:9,background:reminders[s.id]?.enabled?PS.accent:"rgba(255,255,255,0.1)",cursor:"pointer",position:"relative",transition:"background 0.2s",flexShrink:0}}>
-                  <div style={{position:"absolute",top:2,left:reminders[s.id]?.enabled?14:2,width:14,height:14,borderRadius:"50%",background:"white",transition:"left 0.2s"}}/>
+        <div style={{padding:"16px 18px 20px"}}>
+
+          {/* ── Perfil tab ─────────────────────────────────────────── */}
+          {activeTab==="perfil"&&<>
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:10,color:S.textMuted,textTransform:"uppercase",letterSpacing:1.5,marginBottom:8}}>{t.language}</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                {[["en","🇺🇸 English"],["es","🇦🇷 Español"]].map(([code,label])=>(
+                  <button key={code} onClick={()=>setSelLang(code)} style={{padding:"10px 0",borderRadius:11,border:`1px solid ${selLang===code?PS.accentBorder:S.border}`,background:selLang===code?PS.accentDim:"transparent",color:selLang===code?PS.accent:S.textMuted,fontSize:13,fontWeight:selLang===code?600:400,cursor:"pointer"}}>{label}</button>
+                ))}
+              </div>
+            </div>
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:10,color:S.textMuted,textTransform:"uppercase",letterSpacing:1.5,marginBottom:8}}>{t.skin}</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                {Object.values(SKINS).map(sk=>(
+                  <button key={sk.id} onClick={()=>setSelSkin(sk.id)} style={{padding:"10px 12px",borderRadius:11,border:`1px solid ${selSkin===sk.id?sk.accentBorder:S.border}`,background:selSkin===sk.id?sk.accentDim:"transparent",cursor:"pointer",display:"flex",alignItems:"center",gap:8}}>
+                    <div style={{width:14,height:14,borderRadius:"50%",background:sk.accent,flexShrink:0}}/>
+                    <span style={{fontSize:11,fontWeight:selSkin===sk.id?600:400,color:selSkin===sk.id?sk.accent:S.textMuted}}>{lang==="es"?sk.nameEs:sk.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{marginBottom:16}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <div style={{fontSize:10,color:S.textMuted,textTransform:"uppercase",letterSpacing:1.5}}>{t.setGoals}</div>
+                {onRecalc&&<button onClick={()=>{onRecalc();onClose();}} style={{fontSize:10,color:S.accent,background:S.accentDim,border:`1px solid ${S.accentBorder}`,borderRadius:8,padding:"3px 9px",cursor:"pointer"}}>↩ {t.recalcGoals}</button>}
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                {[[t.goalKcal,"kcal","kcal"],[t.goalProtein,"protein","g"],[t.goalCarbs,"carbs","g"],[t.goalFat,"fat","g"]].map(([label,key,unit])=>(
+                  <div key={key}>
+                    <div style={{fontSize:10,color:S.textMuted,marginBottom:4}}>{label}</div>
+                    <div style={{display:"flex",alignItems:"center",background:S.surface,border:`1px solid ${S.border}`,borderRadius:9,overflow:"hidden"}}>
+                      <input type="number" value={selGoals[key]||""} onChange={e=>setGoal(key,e.target.value)} style={{flex:1,background:"transparent",border:"none",color:S.text,fontSize:14,fontFamily:"monospace",padding:"8px 10px",outline:"none",width:0}} min={0}/>
+                      <span style={{fontSize:10,color:S.textMuted,paddingRight:8}}>{unit}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={{display:"flex",gap:8,marginBottom:8}}>
+              <button onClick={doSave} style={{flex:1,background:PS.accent,color:PS.bg,border:"none",borderRadius:11,padding:"12px 0",fontSize:13,fontWeight:700,cursor:"pointer"}}>{t.save}</button>
+              <button onClick={onClose} style={{padding:"12px 16px",background:S.surface,color:S.textMuted,border:`1px solid ${S.border}`,borderRadius:11,fontSize:13,cursor:"pointer"}}>{t.cancel}</button>
+            </div>
+            {onLogout&&<button onClick={onLogout} style={{width:"100%",background:"transparent",border:"1px solid rgba(220,50,50,0.3)",color:"#e05555",borderRadius:11,padding:"10px 0",fontSize:13,fontWeight:600,cursor:"pointer"}}>↩ {t.logout}</button>}
+          </>}
+
+          {/* ── Salud tab ──────────────────────────────────────────── */}
+          {activeTab==="salud"&&<>
+            {/* Macro profile status */}
+            <div style={{marginBottom:12,padding:"12px 14px",background:profile?S.accentDim:"rgba(255,180,80,0.08)",border:`1px solid ${profile?S.accentBorder:"rgba(255,180,80,0.25)"}`,borderRadius:13}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:profile?0:10}}>
+                <span style={{fontSize:20}}>{profile?"✅":"⚠️"}</span>
+                <div>
+                  <div style={{fontSize:13,fontWeight:700,color:profile?S.accent:"#ffb450"}}>{profile?t.profileComplete:t.profileMissing}</div>
+                  {profile&&<div style={{fontSize:11,color:S.textMuted,marginTop:1}}>{profile.weight}kg · {profile.goal} · TDEE {calcTDEE(profile)} kcal</div>}
+                  {!profile&&<div style={{fontSize:11,color:S.textMuted,marginTop:2}}>{t.profileMissingHint}</div>}
                 </div>
               </div>
-            ))}
-          </div>
-          <button onClick={requestAndSave} style={{width:"100%",marginTop:10,background:notifStatus==="granted"?PS.accentDim:"rgba(255,180,80,0.1)",border:`1px solid ${notifStatus==="granted"?PS.accentBorder:"rgba(255,180,80,0.3)"}`,color:notifStatus==="granted"?PS.accent:"#ffb450",borderRadius:10,padding:"10px 0",fontSize:12,fontWeight:600,cursor:"pointer"}}>
-            {notifStatus==="granted"?"🔔 "+t.reminderSet.replace("✓ ",""):"🔔 "+t.enableReminders}
-          </button>
-        </div>
-        {/* Goals */}
-        <div style={{marginBottom:18}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-            <div style={{fontSize:10,color:S.textMuted,textTransform:"uppercase",letterSpacing:1.5}}>{t.setGoals}</div>
-            {onRecalc&&<button onClick={()=>{onRecalc();onClose();}} style={{fontSize:10,color:S.accent,background:S.accentDim,border:`1px solid ${S.accentBorder}`,borderRadius:8,padding:"3px 9px",cursor:"pointer"}}>↩ {t.recalcGoals}</button>}
-          </div>
-          <div style={{fontSize:11,color:S.textMuted,marginBottom:10}}>{t.goalsHint}</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            {[[t.goalKcal,"kcal","kcal"],[t.goalProtein,"protein","g"],[t.goalCarbs,"carbs","g"],[t.goalFat,"fat","g"]].map(([label,key,unit])=>(
-              <div key={key}>
-                <div style={{fontSize:10,color:S.textMuted,marginBottom:4}}>{label}</div>
-                <div style={{display:"flex",alignItems:"center",background:S.surface,border:`1px solid ${S.border}`,borderRadius:9,overflow:"hidden"}}>
-                  <input type="number" value={selGoals[key]||""} onChange={e=>setGoal(key,e.target.value)} style={{flex:1,background:"transparent",border:"none",color:S.text,fontSize:14,fontFamily:"monospace",padding:"8px 10px",outline:"none",width:0}} min={0}/>
-                  <span style={{fontSize:10,color:S.textMuted,paddingRight:8}}>{unit}</span>
+              {!profile&&<button onClick={()=>{onRecalc?.();onClose();}} style={{width:"100%",background:S.accentDim,border:`1px solid ${S.accentBorder}`,color:S.accent,borderRadius:9,padding:"9px 0",fontSize:12,fontWeight:600,cursor:"pointer"}}>→ {t.setupProfile}</button>}
+              {profile&&<button onClick={()=>{onRecalc?.();onClose();}} style={{marginTop:8,fontSize:10,color:S.accent,background:"transparent",border:"none",cursor:"pointer",padding:0}}>↩ {t.recalcGoals}</button>}
+            </div>
+            {/* Apple Health status */}
+            <div style={{padding:"12px 14px",background:healthLinked?S.accentDim:"rgba(255,60,60,0.06)",border:`1px solid ${healthLinked?S.accentBorder:"rgba(255,60,60,0.2)"}`,borderRadius:13}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:showHealthInstr?10:0}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:20}}>🍎</span>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:700,color:healthLinked?S.accent:"#e05555"}}>{t.appleHealth}</div>
+                    <div style={{fontSize:11,marginTop:1,color:healthLinked?S.textMuted:"#e05555",fontWeight:healthLinked?400:600}}>{healthLinked?t.healthLinked:t.healthMissing}</div>
+                  </div>
                 </div>
+                <button onClick={()=>setShowHealthInstr(!showHealthInstr)} style={{background:S.surface,border:`1px solid ${S.border}`,color:S.textMuted,borderRadius:8,padding:"5px 10px",fontSize:11,cursor:"pointer"}}>{showHealthInstr?"↑":t.howToLink+" →"}</button>
               </div>
-            ))}
-          </div>
+              {showHealthInstr&&<div style={{borderTop:`1px solid ${S.border}`,paddingTop:10}}>
+                <div style={{fontSize:12,fontWeight:700,color:S.text,marginBottom:8}}>{t.healthSetupTitle}</div>
+                {[t.healthSetupStep1,t.healthSetupStep2,t.healthSetupStep3,t.healthSetupStep4].map((s,i)=>(
+                  <div key={i} style={{fontSize:11,color:S.textMuted,lineHeight:1.6,marginBottom:2}}>{s}</div>
+                ))}
+                <div style={{marginTop:10,fontSize:10,color:S.textMuted,marginBottom:4}}>{t.healthSetupHint}</div>
+                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                  <div style={{flex:1,background:S.surface,border:`1px solid ${S.border}`,borderRadius:8,padding:"6px 10px",fontFamily:"monospace",fontSize:11,color:S.accent,wordBreak:"break-all"}}>{user.id}</div>
+                  <button onClick={copyId} style={{background:S.accentDim,border:`1px solid ${S.accentBorder}`,color:S.accent,borderRadius:8,padding:"6px 10px",fontSize:11,fontWeight:600,cursor:"pointer",flexShrink:0}}>{copied?"✓":t.healthCopy}</button>
+                </div>
+              </div>}
+            </div>
+            <div style={{marginTop:10,fontSize:11,color:S.textMuted,lineHeight:1.6,textAlign:"center"}}>
+              {lang==="es"?"El perfil y Apple Health ajustan tus metas diarias automáticamente.":"Your profile and Apple Health data automatically adjust your daily goals."}
+            </div>
+          </>}
+
+          {/* ── Avisos tab ─────────────────────────────────────────── */}
+          {activeTab==="avisos"&&<>
+            <div style={{fontSize:11,color:S.textMuted,marginBottom:12}}>{t.remindersHint}</div>
+            <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
+              {slots.map(s=>(
+                <div key={s.id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:reminders[s.id]?.enabled?PS.accentDim:S.surface,border:`1px solid ${reminders[s.id]?.enabled?PS.accentBorder:S.border}`,borderRadius:10}}>
+                  <span style={{fontSize:14}}>{s.icon}</span>
+                  <div style={{flex:1,fontSize:12,color:reminders[s.id]?.enabled?PS.accent:S.textMuted,fontWeight:reminders[s.id]?.enabled?600:400}}>{s.label}</div>
+                  <input type="time" value={reminders[s.id]?.time||"09:00"} onChange={e=>setTime(s.id,e.target.value)} style={{background:"rgba(255,255,255,0.06)",border:"none",color:PS.accent,fontSize:11,borderRadius:6,padding:"3px 6px",outline:"none",colorScheme:"dark",opacity:reminders[s.id]?.enabled?1:0.3}}/>
+                  <div onClick={()=>toggleSlot(s.id)} style={{width:32,height:18,borderRadius:9,background:reminders[s.id]?.enabled?PS.accent:"rgba(255,255,255,0.1)",cursor:"pointer",position:"relative",flexShrink:0}}>
+                    <div style={{position:"absolute",top:2,left:reminders[s.id]?.enabled?14:2,width:14,height:14,borderRadius:"50%",background:"white",transition:"left 0.2s"}}/>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button onClick={requestAndSave} style={{width:"100%",background:notifStatus==="granted"?PS.accentDim:"rgba(255,180,80,0.1)",border:`1px solid ${notifStatus==="granted"?PS.accentBorder:"rgba(255,180,80,0.3)"}`,color:notifStatus==="granted"?PS.accent:"#ffb450",borderRadius:10,padding:"10px 0",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+              {notifStatus==="granted"?"🔔 "+t.reminderSet.replace("✓ ",""):"🔔 "+t.enableReminders}
+            </button>
+          </>}
+
+          {/* ── Datos tab ──────────────────────────────────────────── */}
+          {activeTab==="datos"&&<>
+            <button onClick={()=>{onClose();onOpenPresets?.();}} style={{width:"100%",marginBottom:10,background:S.accentDim,border:`1px solid ${S.accentBorder}`,color:S.accent,borderRadius:11,padding:"12px 0",fontSize:13,fontWeight:600,cursor:"pointer"}}>📋 {t.managePresets}</button>
+            <button onClick={()=>{ const today=todayKey(); exportBackup(history,history[today]||{},today,user.id,user.name); localStorage.setItem(`tracky-lastbackup-${user.id}`,Date.now().toString()); }} style={{width:"100%",background:S.surface,border:`1px solid ${S.border}`,color:S.textMuted,borderRadius:11,padding:"11px 0",fontSize:13,fontWeight:600,cursor:"pointer"}}>💾 {lang==="es"?"Backup ahora":"Backup now"}</button>
+          </>}
+
         </div>
-        <button onClick={()=>{ const today=todayKey(); exportBackup(history,history[today]||{},today,user.id,user.name); localStorage.setItem(`tracky-lastbackup-${user.id}`,Date.now().toString()); }} style={{width:"100%",marginBottom:8,background:"rgba(255,255,255,0.04)",border:`1px solid ${S.border}`,color:S.textMuted,borderRadius:11,padding:"11px 0",fontSize:13,fontWeight:600,cursor:"pointer"}}>💾 {lang==="es"?"Backup ahora":"Backup now"}</button>
-        <div style={{display:"flex",gap:8,marginBottom:8}}>
-          <button onClick={()=>{localStorage.setItem(`tracky-reminders-${user.id}`,JSON.stringify(reminders));const sw=navigator.serviceWorker?.controller;if(sw)sw.postMessage({type:"SCHEDULE_REMINDERS",reminders,lang:selLang});onSaveGoals(selGoals);onSave(selLang,selSkin);}} style={{flex:1,background:PS.accent,color:PS.bg,border:"none",borderRadius:11,padding:"12px 0",fontSize:13,fontWeight:700,cursor:"pointer"}}>{t.save}</button>
-          <button onClick={onClose} style={{padding:"12px 16px",background:S.surface,color:S.textMuted,border:`1px solid ${S.border}`,borderRadius:11,fontSize:13,cursor:"pointer"}}>{t.cancel}</button>
-        </div>
-        {onLogout&&<button onClick={onLogout} style={{width:"100%",background:"transparent",border:"1px solid rgba(220,50,50,0.3)",color:"#e05555",borderRadius:11,padding:"11px 0",fontSize:13,fontWeight:600,cursor:"pointer"}}>↩ {t.logout}</button>}
       </div>
     </div>
   );
@@ -809,7 +950,9 @@ function MealModal({ slot, entry, onSave, onClose, isBackfill, S, t, userId, lan
   const [manualInput,setManualInput]=useState("");
   const [showPresets,setShowPresets]=useState(false);
   const [presets,setPresets]=useState([]);
-  useEffect(()=>{ getPresets(userId).then(ps=>setPresets(ps.map(p=>({...p,slotId:p.slot_id})))); },[userId]);
+  useEffect(()=>{ getPresets(userId).then(ps=>setPresets(ps.map(p=>({...p,slotId:p.slot_id||p.slotId})))); },[userId]);
+  const getPresetTags=()=>{ try{return JSON.parse(localStorage.getItem(`tracky-preset-tags-${userId}`)||"{}");}catch{return{};} };
+  const presetMatchesSlot=(p)=>{ const allT=getPresetTags(); return p.slotId===slot.id||[...(allT[p.id]||[])].includes(slot.id); };
   const fileRef=useRef();
   useEffect(()=>{ if(!timestamp){if(isBackfill)setTimestamp(`${String(slot.rH).padStart(2,"0")}:${String(slot.rM).padStart(2,"0")}`);else setTimestamp(new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",hour12:false}));} },[]);
 
@@ -945,9 +1088,9 @@ function MealModal({ slot, entry, onSave, onClose, isBackfill, S, t, userId, lan
             <button onClick={()=>titleInput.trim()&&doAIAnalysis(titleInput.trim())} style={{background:S.accent,border:"none",color:S.bg,borderRadius:10,padding:"9px 14px",fontSize:13,fontWeight:700,cursor:"pointer",flexShrink:0}}>{lang==="es"?"Analizar":"Analyze"}</button>
           </div>}
           {showPresets&&<div style={{marginTop:8,background:S.surface,border:`1px solid ${S.border}`,borderRadius:12,overflow:"hidden"}}>
-            {presets.filter(p=>p.slotId===slot.id).length===0
+            {presets.filter(presetMatchesSlot).length===0
               ?<div style={{padding:"16px",textAlign:"center",color:S.textMuted,fontSize:12}}>{t.noPresets}</div>
-              :presets.filter(p=>p.slotId===slot.id).map((p,i)=>(
+              :presets.filter(presetMatchesSlot).map((p,i)=>(
                 <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderBottom:`1px solid ${S.border}`}}>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontSize:13,fontWeight:600,color:S.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</div>
@@ -1356,6 +1499,7 @@ function App({ user, onLogout }) {
   const [backupMsg,setBackupMsg]=useState("");
   const [showSettings,setShowSettings]=useState(false);
   const [showPDF,setShowPDF]=useState(false);
+  const [showPresets,setShowPresets]=useState(false);
   const [toast,setToast]=useState(null);
   const [goals,setGoals]=useState(()=>loadGoals(user.id));
   const [showOnboarding,setShowOnboarding]=useState(()=>!loadGoals(user.id));
@@ -1379,6 +1523,7 @@ function App({ user, onLogout }) {
           if(d.workout) updated.workout=d.workout;
           data[date]=updated;
           saveDayData(user.id,date,updated);
+          localStorage.setItem(`tracky-health-linked-${user.id}`,"1");
         }
         window.history.replaceState({},"",window.location.pathname);
       } catch(e){ console.error("Health sync error:",e); }
@@ -1411,12 +1556,13 @@ function App({ user, onLogout }) {
   const viewedDay=historyDay?{...(history[historyDay]||{meals:{},workout:{},weight:""})}:null;
 
   return (
-    <div style={{minHeight:"100vh",background:S.bg,fontFamily:"'DM Sans',sans-serif",color:S.text,paddingBottom:"calc(68px + env(safe-area-inset-bottom))",transition:"background 0.4s"}}>
-      {toast&&<div style={{position:"fixed",bottom:"calc(76px + env(safe-area-inset-bottom))",left:"50%",transform:"translateX(-50%)",background:S.card,border:`1px solid ${S.accentBorder}`,color:S.accent,padding:"10px 22px",borderRadius:30,fontSize:13,zIndex:999,animation:"toastIn 0.3s ease",whiteSpace:"nowrap",boxShadow:"0 6px 24px rgba(0,0,0,0.5)"}}>{toast}</div>}
+    <div style={{minHeight:"100vh",background:S.bg,fontFamily:"'DM Sans',sans-serif",color:S.text,paddingBottom:"calc(56px + env(safe-area-inset-bottom))",transition:"background 0.4s"}}>
+      {toast&&<div style={{position:"fixed",bottom:"calc(64px + env(safe-area-inset-bottom))",left:"50%",transform:"translateX(-50%)",background:S.card,border:`1px solid ${S.accentBorder}`,color:S.accent,padding:"10px 22px",borderRadius:30,fontSize:13,zIndex:999,animation:"toastIn 0.3s ease",whiteSpace:"nowrap",boxShadow:"0 6px 24px rgba(0,0,0,0.5)"}}>{toast}</div>}
       {showCal&&<CalendarPicker history={history} onSelect={handleCalSelect} onClose={()=>setShowCal(false)} S={S} t={t} lang={lang}/>}
       {showPDF&&<PDFRangeModal history={{...history,[today]:todayData}} today={today} onClose={()=>setShowPDF(false)} userName={user.name} lang={lang} S={S} t={t}/>}
       {showOnboarding&&<OnboardingModal user={user} S={S} t={t} onComplete={handleOnboardingComplete} onSkip={()=>setShowOnboarding(false)}/>}
-      {showSettings&&<SettingsModal user={user} S={S} lang={lang} skinId={skinId} onSave={handleSaveSettings} onClose={()=>setShowSettings(false)} history={{...history,[today]:todayData}} goals={goals} onSaveGoals={handleSaveGoals} onRecalc={()=>{setShowOnboarding(true);setShowSettings(false);}} onLogout={onLogout}/>}
+      {showSettings&&<SettingsModal user={user} S={S} lang={lang} skinId={skinId} onSave={handleSaveSettings} onClose={()=>setShowSettings(false)} history={{...history,[today]:todayData}} goals={goals} onSaveGoals={handleSaveGoals} onRecalc={()=>{setShowOnboarding(true);setShowSettings(false);}} onLogout={onLogout} onOpenPresets={()=>setShowPresets(true)}/>}
+      {showPresets&&<PresetsManager userId={user.id} S={S} t={t} lang={lang} onClose={()=>setShowPresets(false)}/>}
 
       {/* Header */}
       <div style={{padding:"16px 18px 14px",borderBottom:`1px solid ${S.border}`}}>
@@ -1482,9 +1628,9 @@ function App({ user, onLogout }) {
       {/* Bottom navigation */}
       <div style={{position:"fixed",bottom:0,left:0,right:0,background:S.card,borderTop:`1px solid ${S.border}`,display:"flex",paddingBottom:"env(safe-area-inset-bottom)",zIndex:200}}>
         {[["today","📝",t.today],["week","📊",t.week],["history","📋",t.history]].map(([key,icon,label])=>(
-          <button key={key} onClick={()=>{setTab(key);setHistoryDay(null);}} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"10px 0 8px",background:"transparent",border:"none",color:tab===key?S.accent:S.textMuted,cursor:"pointer",transition:"color 0.2s"}}>
-            <span style={{fontSize:20,lineHeight:1}}>{icon}</span>
-            <span style={{fontSize:10,fontWeight:tab===key?700:400,letterSpacing:0.3}}>{label}</span>
+          <button key={key} onClick={()=>{setTab(key);setHistoryDay(null);}} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:1,padding:"7px 0 5px",background:"transparent",border:"none",color:tab===key?S.accent:S.textMuted,cursor:"pointer",transition:"color 0.2s"}}>
+            <span style={{fontSize:17,lineHeight:1}}>{icon}</span>
+            <span style={{fontSize:9,fontWeight:tab===key?700:400,letterSpacing:0.3}}>{label}</span>
           </button>
         ))}
       </div>
