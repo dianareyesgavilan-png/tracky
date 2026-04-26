@@ -1524,6 +1524,17 @@ function App({ user, onLogout }) {
           data[date]=updated;
           saveDayData(user.id,date,updated);
           localStorage.setItem(`tracky-health-linked-${user.id}`,"1");
+          // Recalculate daily goals if profile exists and weight changed
+          if(d.weight){
+            const prof=loadProfile(user.id);
+            if(prof){
+              const updatedProf={...prof,weight:parseFloat(d.weight)};
+              saveProfile(user.id,updatedProf);
+              const newGoals=calcGoalsFromProfile(updatedProf);
+              setGoals(newGoals);
+              saveGoals(user.id,newGoals);
+            }
+          }
         }
         window.history.replaceState({},"",window.location.pathname);
       } catch(e){ console.error("Health sync error:",e); }
