@@ -86,7 +86,7 @@ const T = {
     yourTargets:"Your daily targets", basedOn:"Calculated from your data",
     editHint:"Tap any value to adjust", startTracking:"Start tracking!",
     skipOnboard:"Skip for now", recalcGoals:"Recalculate goals", years:"yrs", heightUnit:"cm",
-    next:"Next →",
+    next:"Next →", logout:"Log out",
   },
   es: {
     appTagline:"diario de comidas", today:"Hoy", week:"Semana", history:"Historial",
@@ -142,7 +142,7 @@ const T = {
     yourTargets:"Tus metas diarias", basedOn:"Calculado con tus datos",
     editHint:"Tocá cualquier valor para ajustar", startTracking:"¡Empezar!",
     skipOnboard:"Saltar por ahora", recalcGoals:"Recalcular metas", years:"años", heightUnit:"cm",
-    next:"Siguiente →",
+    next:"Siguiente →", logout:"Cerrar sesión",
   },
 };
 
@@ -463,7 +463,7 @@ function OnboardingModal({ user, S, t, onComplete, onSkip }) {
 }
 
 /* ═══ SETTINGS MODAL ════════════════════════════════════════════════════ */
-function SettingsModal({ user, S, lang, skinId, onSave, onClose, history, goals, onSaveGoals, onRecalc }) {
+function SettingsModal({ user, S, lang, skinId, onSave, onClose, history, goals, onSaveGoals, onRecalc, onLogout }) {
   const [selLang,setSelLang]=useState(lang);
   const [selSkin,setSelSkin]=useState(skinId);
   const [selGoals,setSelGoals]=useState(goals||DEFAULT_GOALS);
@@ -551,10 +551,11 @@ function SettingsModal({ user, S, lang, skinId, onSave, onClose, history, goals,
           </div>
         </div>
         <button onClick={()=>{ const today=todayKey(); exportBackup(history,history[today]||{},today,user.id,user.name); localStorage.setItem(`tracky-lastbackup-${user.id}`,Date.now().toString()); }} style={{width:"100%",marginBottom:8,background:"rgba(255,255,255,0.04)",border:`1px solid ${S.border}`,color:S.textMuted,borderRadius:11,padding:"11px 0",fontSize:13,fontWeight:600,cursor:"pointer"}}>💾 {lang==="es"?"Backup ahora":"Backup now"}</button>
-        <div style={{display:"flex",gap:8}}>
+        <div style={{display:"flex",gap:8,marginBottom:8}}>
           <button onClick={()=>{localStorage.setItem(`tracky-reminders-${user.id}`,JSON.stringify(reminders));const sw=navigator.serviceWorker?.controller;if(sw)sw.postMessage({type:"SCHEDULE_REMINDERS",reminders,lang:selLang});onSaveGoals(selGoals);onSave(selLang,selSkin);}} style={{flex:1,background:PS.accent,color:PS.bg,border:"none",borderRadius:11,padding:"12px 0",fontSize:13,fontWeight:700,cursor:"pointer"}}>{t.save}</button>
           <button onClick={onClose} style={{padding:"12px 16px",background:S.surface,color:S.textMuted,border:`1px solid ${S.border}`,borderRadius:11,fontSize:13,cursor:"pointer"}}>{t.cancel}</button>
         </div>
+        {onLogout&&<button onClick={onLogout} style={{width:"100%",background:"transparent",border:"1px solid rgba(220,50,50,0.3)",color:"#e05555",borderRadius:11,padding:"11px 0",fontSize:13,fontWeight:600,cursor:"pointer"}}>↩ {t.logout}</button>}
       </div>
     </div>
   );
@@ -1410,28 +1411,28 @@ function App({ user, onLogout }) {
   const viewedDay=historyDay?{...(history[historyDay]||{meals:{},workout:{},weight:""})}:null;
 
   return (
-    <div style={{minHeight:"100vh",background:S.bg,fontFamily:"'DM Sans',sans-serif",color:S.text,paddingBottom:60,transition:"background 0.4s"}}>
-      {toast&&<div style={{position:"fixed",bottom:28,left:"50%",transform:"translateX(-50%)",background:S.card,border:`1px solid ${S.accentBorder}`,color:S.accent,padding:"10px 22px",borderRadius:30,fontSize:13,zIndex:999,animation:"toastIn 0.3s ease",whiteSpace:"nowrap",boxShadow:"0 6px 24px rgba(0,0,0,0.5)"}}>{toast}</div>}
+    <div style={{minHeight:"100vh",background:S.bg,fontFamily:"'DM Sans',sans-serif",color:S.text,paddingBottom:"calc(68px + env(safe-area-inset-bottom))",transition:"background 0.4s"}}>
+      {toast&&<div style={{position:"fixed",bottom:"calc(76px + env(safe-area-inset-bottom))",left:"50%",transform:"translateX(-50%)",background:S.card,border:`1px solid ${S.accentBorder}`,color:S.accent,padding:"10px 22px",borderRadius:30,fontSize:13,zIndex:999,animation:"toastIn 0.3s ease",whiteSpace:"nowrap",boxShadow:"0 6px 24px rgba(0,0,0,0.5)"}}>{toast}</div>}
       {showCal&&<CalendarPicker history={history} onSelect={handleCalSelect} onClose={()=>setShowCal(false)} S={S} t={t} lang={lang}/>}
       {showPDF&&<PDFRangeModal history={{...history,[today]:todayData}} today={today} onClose={()=>setShowPDF(false)} userName={user.name} lang={lang} S={S} t={t}/>}
       {showOnboarding&&<OnboardingModal user={user} S={S} t={t} onComplete={handleOnboardingComplete} onSkip={()=>setShowOnboarding(false)}/>}
-      {showSettings&&<SettingsModal user={user} S={S} lang={lang} skinId={skinId} onSave={handleSaveSettings} onClose={()=>setShowSettings(false)} history={{...history,[today]:todayData}} goals={goals} onSaveGoals={handleSaveGoals} onRecalc={()=>{setShowOnboarding(true);setShowSettings(false);}}/>}
+      {showSettings&&<SettingsModal user={user} S={S} lang={lang} skinId={skinId} onSave={handleSaveSettings} onClose={()=>setShowSettings(false)} history={{...history,[today]:todayData}} goals={goals} onSaveGoals={handleSaveGoals} onRecalc={()=>{setShowOnboarding(true);setShowSettings(false);}} onLogout={onLogout}/>}
 
       {/* Header */}
-      <div style={{padding:"24px 18px 0",borderBottom:`1px solid ${S.border}`}}>
+      <div style={{padding:"16px 18px 14px",borderBottom:`1px solid ${S.border}`}}>
         <div style={{maxWidth:560,margin:"0 auto"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div>
-              <Wordmark S={S} size={28}/>
-              <div style={{display:"flex",gap:10,alignItems:"center",marginTop:3}}>
+              <Wordmark S={S} size={26}/>
+              <div style={{display:"flex",gap:10,alignItems:"center",marginTop:2}}>
                 <div style={{fontSize:11,color:S.textMuted}}>{user.name}</div>
                 {tab==="today"&&dayKcal>0&&<div style={{fontSize:11,color:S.accent,fontFamily:"monospace",fontWeight:600}}>{dayKcal} kcal</div>}
               </div>
             </div>
-            <div style={{display:"flex",gap:6,alignItems:"center"}}>
-              <button onClick={()=>setShowCal(true)} style={{background:S.surface,border:`1px solid ${S.border}`,color:S.textMuted,borderRadius:9,padding:"5px 9px",fontSize:13,cursor:"pointer"}}>📅</button>
-              <button onClick={()=>setShowPDF(true)} style={{background:S.accentDim,border:`1px solid ${S.accentBorder}`,color:S.accent,borderRadius:9,padding:"5px 11px",fontSize:12,cursor:"pointer",fontWeight:600}}>{t.pdfExport}</button>
-              <label title={t.restoreBackup} style={{background:S.surface,border:`1px solid ${S.border}`,color:S.textMuted,borderRadius:9,padding:"5px 9px",fontSize:13,cursor:"pointer",display:"flex",alignItems:"center"}}>
+            <div style={{display:"flex",gap:5,alignItems:"center"}}>
+              <button onClick={()=>setShowCal(true)} style={{background:S.surface,border:`1px solid ${S.border}`,color:S.textMuted,borderRadius:9,padding:"6px 10px",fontSize:15,cursor:"pointer",lineHeight:1}}>📅</button>
+              <button onClick={()=>setShowPDF(true)} style={{background:S.accentDim,border:`1px solid ${S.accentBorder}`,color:S.accent,borderRadius:9,padding:"6px 10px",fontSize:15,cursor:"pointer",lineHeight:1}}>📄</button>
+              <label title={t.restoreBackup} style={{background:S.surface,border:`1px solid ${S.border}`,color:S.textMuted,borderRadius:9,padding:"6px 10px",fontSize:15,cursor:"pointer",display:"flex",alignItems:"center",lineHeight:1}}>
                 💾
                 <input type="file" accept=".json" style={{display:"none"}} onChange={e=>{
                   const f=e.target.files[0]; if(!f) return;
@@ -1440,16 +1441,10 @@ function App({ user, onLogout }) {
                 }}/>
               </label>
               {backupMsg&&<span style={{fontSize:11,color:S.accent,fontWeight:600}}>{backupMsg}</span>}
-              <button onClick={()=>setShowSettings(true)} style={{background:S.surface,border:`1px solid ${S.border}`,color:S.textMuted,borderRadius:9,padding:"5px 9px",fontSize:13,cursor:"pointer"}}>⚙️</button>
-              <button onClick={onLogout} style={{background:S.surface,border:`1px solid ${S.border}`,color:S.textMuted,borderRadius:9,padding:"5px 9px",fontSize:12,cursor:"pointer"}}>↩</button>
+              <button onClick={()=>setShowSettings(true)} style={{background:S.surface,border:`1px solid ${S.border}`,color:S.textMuted,borderRadius:9,padding:"6px 10px",fontSize:15,cursor:"pointer",lineHeight:1}}>⚙️</button>
             </div>
           </div>
-          <div style={{display:"flex",gap:3,background:"rgba(255,255,255,0.03)",borderRadius:10,padding:3}}>
-            {[["today",t.today],["week",t.week],["history",t.history]].map(([key,label])=>(
-              <button key={key} onClick={()=>{setTab(key);setHistoryDay(null);}} style={{flex:1,padding:"8px 0",fontSize:13,fontWeight:500,borderRadius:8,border:"none",cursor:"pointer",background:tab===key?S.accentDim:"transparent",color:tab===key?S.accent:S.textMuted,transition:"all 0.2s"}}>{label}</button>
-            ))}
-          </div>
-          {tab==="today"&&<div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0 0"}}>
+          {tab==="today"&&<div style={{display:"flex",alignItems:"center",gap:10,marginTop:10}}>
             <div style={{flex:1,height:2,background:"rgba(255,255,255,0.06)",borderRadius:1}}><div style={{height:"100%",background:`linear-gradient(90deg,${S.accent},${S.accent}aa)`,borderRadius:1,width:`${(loggedCount/6)*100}%`,transition:"width 0.5s"}}/></div>
             <div style={{fontSize:11,color:S.textMuted,whiteSpace:"nowrap"}}>{loggedCount} {t.of} 6</div>
           </div>}
@@ -1482,6 +1477,16 @@ function App({ user, onLogout }) {
           <DailyStats stats={{workout:viewedDay?.workout,weight:viewedDay?.weight}} onChange={s=>updateStats(historyDay,s)} readOnly={historyDay>today} S={S} t={t}/>
           <MealGrid meals={viewedDay?.meals} onUpdate={(id,e)=>updateMeal(historyDay,id,e)} readOnly={historyDay>today} isBackfill={historyDay<today} S={S} t={t} lang={lang} userId={user.id}/>
         </div>}
+      </div>
+
+      {/* Bottom navigation */}
+      <div style={{position:"fixed",bottom:0,left:0,right:0,background:S.card,borderTop:`1px solid ${S.border}`,display:"flex",paddingBottom:"env(safe-area-inset-bottom)",zIndex:200}}>
+        {[["today","📝",t.today],["week","📊",t.week],["history","📋",t.history]].map(([key,icon,label])=>(
+          <button key={key} onClick={()=>{setTab(key);setHistoryDay(null);}} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"10px 0 8px",background:"transparent",border:"none",color:tab===key?S.accent:S.textMuted,cursor:"pointer",transition:"color 0.2s"}}>
+            <span style={{fontSize:20,lineHeight:1}}>{icon}</span>
+            <span style={{fontSize:10,fontWeight:tab===key?700:400,letterSpacing:0.3}}>{label}</span>
+          </button>
+        ))}
       </div>
     </div>
   );
