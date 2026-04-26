@@ -95,7 +95,12 @@ export async function getUsers() {
       .select('id, name, lang, skin, created_at')
       .order('created_at', { ascending: true })
     if (error) throw error
-    return data || []
+    const sbUsers = data || []
+    // Merge with any users saved locally during a Supabase outage
+    const lsUsers = await ls_getUsers()
+    const sbIds = new Set(sbUsers.map(u => u.id))
+    const localOnly = lsUsers.filter(u => !sbIds.has(u.id))
+    return [...sbUsers, ...localOnly]
   } catch (e) {
     console.warn('Supabase getUsers failed, using localStorage:', e.message)
     return ls_getUsers()
@@ -130,8 +135,17 @@ export async function verifyUser(userId, pin) {
       .eq('id', userId)
       .eq('pin_hash', pin_hash)
       .single()
-    if (error) throw error
-    return data
+    // PGRST116 = no rows found (not an error, just not in Supabase yet)
+    if (error && error.code !== 'PGRST116') throw error
+    if (data) return data
+    // Not found in Supabase — check localStorage (user created during outage)
+    const lsUser = await ls_verifyUser(userId, pin)
+    if (lsUser) {
+      // Migrate user to Supabase silently
+      const raw = lsGet('users', []).find(u => u.id === userId)
+      if (raw) supabase.from('users').upsert(raw, { onConflict: 'id' }).then().catch(() => {})
+    }
+    return lsUser
   } catch (e) {
     console.warn('Supabase verifyUser failed, using localStorage:', e.message)
     return ls_verifyUser(userId, pin)

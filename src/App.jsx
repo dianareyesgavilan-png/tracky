@@ -126,6 +126,22 @@ const T = {
     streak:"días seguidos", dailyGoals:"Meta del día", noGoals:"Definí tus metas para ver el progreso aquí",
     goalKcal:"Calorías", goalProtein:"Proteína (g)", goalCarbs:"Carbos (g)", goalFat:"Grasa (g)",
     setGoals:"Metas diarias", goalsHint:"Tus objetivos nutricionales diarios",
+    onboardTitle:"Configurá tu perfil", onboardSub:"Vamos a calcular tus metas diarias automáticamente",
+    goalLose:"Bajar grasa 🔥", goalLoseHint:"Reducir grasa corporal manteniendo músculo",
+    goalMaintain:"Mantener ⚖️", goalMaintainHint:"Sostener tu peso y composición actual",
+    goalGain:"Ganar músculo 💪", goalGainHint:"Volumen limpio con superávit calórico moderado",
+    goalPerf:"Rendimiento 🏅", goalPerfHint:"Combustible para entrenar y recuperarte mejor",
+    yourStats:"Tus datos", sexF:"Femenino", sexM:"Masculino",
+    actTitle:"¿Qué tan activo/a sos?",
+    actSed:"Sedentario/a", actSedHint:"Trabajo de escritorio, poco ejercicio",
+    actLight:"Ligero/a", actLightHint:"1–2 entrenamientos por semana",
+    actMod:"Moderado/a", actModHint:"3–4 entrenamientos por semana",
+    actActive:"Muy activo/a", actActiveHint:"5–6 entrenamientos por semana",
+    actVery:"Atleta", actVeryHint:"Entrenamiento intenso diario o 2 veces al día",
+    yourTargets:"Tus metas diarias", basedOn:"Calculado con tus datos",
+    editHint:"Tocá cualquier valor para ajustar", startTracking:"¡Empezar!",
+    skipOnboard:"Saltar por ahora", recalcGoals:"Recalcular metas", years:"años", heightUnit:"cm",
+    next:"Siguiente →",
   },
 };
 
@@ -167,6 +183,25 @@ function calcStreak(history) {
 function loadGoals(uid) { try{return JSON.parse(localStorage.getItem(`tracky-goals-${uid}`)||"null");}catch{return null;} }
 function saveGoals(uid,g) { try{localStorage.setItem(`tracky-goals-${uid}`,JSON.stringify(g));}catch{} }
 const DEFAULT_GOALS={kcal:2000,protein:120,carbs:200,fat:65};
+function loadProfile(uid) { try{return JSON.parse(localStorage.getItem(`tracky-profile-${uid}`)||"null");}catch{return null;} }
+function saveProfile(uid,p) { try{localStorage.setItem(`tracky-profile-${uid}`,JSON.stringify(p));}catch{} }
+function calcTDEE(profile) {
+  const {sex,age,height,weight,activity}=profile;
+  const bmr=sex==="f"?10*weight+6.25*height-5*age-161:10*weight+6.25*height-5*age+5;
+  const m={sed:1.2,light:1.375,mod:1.55,active:1.725,very:1.9};
+  return Math.round(bmr*(m[activity]||1.55));
+}
+function calcGoalsFromProfile(profile) {
+  const tdee=calcTDEE(profile); const {goal,weight}=profile;
+  let kcal,protein,fat,carbs;
+  if(goal==="lose"){kcal=Math.round(tdee*0.8);protein=Math.round(weight*2.2);}
+  else if(goal==="gain"){kcal=Math.round(tdee*1.1);protein=Math.round(weight*2.0);}
+  else if(goal==="perf"){kcal=tdee;protein=Math.round(weight*2.0);}
+  else{kcal=tdee;protein=Math.round(weight*1.6);}
+  fat=Math.round(kcal*0.25/9);
+  carbs=Math.round((kcal-protein*4-fat*9)/4);
+  return{kcal,protein:Math.max(protein,50),carbs:Math.max(carbs,50),fat:Math.max(fat,30)};
+}
 
 function getCalendarDays(year,month) {
   const first=new Date(year,month,1); const last=new Date(year,month+1,0);
@@ -322,8 +357,112 @@ function Wordmark({ S, size=28 }) {
   );
 }
 
+/* ═══ ONBOARDING MODAL ═══════════════════════════════════════════════════ */
+function OnboardingModal({ user, S, t, onComplete, onSkip }) {
+  const [step,setStep]=useState(0);
+  const [profile,setProfile]=useState(()=>loadProfile(user.id)||{goal:"maintain",sex:"f",age:25,height:165,weight:65,activity:"mod"});
+  const [editGoals,setEditGoals]=useState(null);
+  const setP=(k,v)=>setProfile(p=>({...p,[k]:v}));
+  const goalsList=[["lose",t.goalLose,t.goalLoseHint],["maintain",t.goalMaintain,t.goalMaintainHint],["gain",t.goalGain,t.goalGainHint],["perf",t.goalPerf,t.goalPerfHint]];
+  const actList=[["sed",t.actSed,t.actSedHint],["light",t.actLight,t.actLightHint],["mod",t.actMod,t.actModHint],["active",t.actActive,t.actActiveHint],["very",t.actVery,t.actVeryHint]];
+  const goNext=()=>{ if(step===2){const g=calcGoalsFromProfile(profile);setEditGoals(g);} setStep(s=>s+1); };
+  const handleComplete=()=>{ saveProfile(user.id,profile); onComplete(editGoals); };
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.92)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:500,padding:16}}>
+      <div style={{background:S.card,borderRadius:24,width:"100%",maxWidth:400,maxHeight:"92vh",overflow:"auto",border:`1px solid ${S.accentBorder}`,padding:"28px 22px 26px"}}>
+        {/* Progress dots */}
+        <div style={{display:"flex",gap:6,justifyContent:"center",marginBottom:24}}>
+          {[0,1,2,3].map(i=><div key={i} style={{width:i===step?20:6,height:6,borderRadius:3,background:i<=step?S.accent:S.border,transition:"all 0.3s"}}/>)}
+        </div>
+
+        {/* Step 0: Goal */}
+        {step===0&&<>
+          <div style={{textAlign:"center",marginBottom:22}}>
+            <div style={{fontSize:22,fontWeight:800,color:S.text,fontFamily:"'Plus Jakarta Sans',sans-serif",marginBottom:6}}>{t.onboardTitle}</div>
+            <div style={{fontSize:13,color:S.textMuted}}>{t.onboardSub}</div>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {goalsList.map(([key,label,hint])=>(
+              <button key={key} onClick={()=>setP("goal",key)} style={{background:profile.goal===key?S.accentDim:S.surface,border:`1px solid ${profile.goal===key?S.accentBorder:S.border}`,borderRadius:14,padding:"14px 16px",cursor:"pointer",textAlign:"left",transition:"all 0.15s"}}>
+                <div style={{fontSize:15,fontWeight:700,color:profile.goal===key?S.accent:S.text}}>{label}</div>
+                <div style={{fontSize:12,color:S.textMuted,marginTop:3}}>{hint}</div>
+              </button>
+            ))}
+          </div>
+        </>}
+
+        {/* Step 1: Stats */}
+        {step===1&&<>
+          <div style={{fontSize:20,fontWeight:800,color:S.text,fontFamily:"'Plus Jakarta Sans',sans-serif",marginBottom:20}}>{t.yourStats}</div>
+          <div style={{marginBottom:16}}>
+            <div style={{fontSize:10,color:S.textMuted,textTransform:"uppercase",letterSpacing:1.5,marginBottom:8}}>Sexo</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              {[["f",t.sexF],["m",t.sexM]].map(([key,label])=>(
+                <button key={key} onClick={()=>setP("sex",key)} style={{background:profile.sex===key?S.accentDim:S.surface,border:`1px solid ${profile.sex===key?S.accentBorder:S.border}`,borderRadius:11,padding:"11px 0",color:profile.sex===key?S.accent:S.textMuted,fontSize:13,fontWeight:profile.sex===key?600:400,cursor:"pointer",transition:"all 0.15s"}}>{label}</button>
+              ))}
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+            {[["age",t.years,1,120],["height",t.heightUnit,100,250],["weight",t.kg,30,300]].map(([key,unit,min,max])=>(
+              <div key={key}>
+                <div style={{fontSize:10,color:S.textMuted,textTransform:"uppercase",letterSpacing:1,marginBottom:5}}>{unit}</div>
+                <div style={{background:S.surface,border:`1px solid ${S.border}`,borderRadius:9,overflow:"hidden"}}>
+                  <input type="number" value={profile[key]} onChange={e=>setP(key,key==="weight"?parseFloat(e.target.value)||0:parseInt(e.target.value)||0)} min={min} max={max} step={key==="weight"?0.1:1}
+                    style={{width:"100%",background:"transparent",border:"none",color:S.text,fontSize:16,fontFamily:"monospace",padding:"10px 8px",outline:"none",textAlign:"center"}}/>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>}
+
+        {/* Step 2: Activity */}
+        {step===2&&<>
+          <div style={{fontSize:20,fontWeight:800,color:S.text,fontFamily:"'Plus Jakarta Sans',sans-serif",marginBottom:20}}>{t.actTitle}</div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {actList.map(([key,label,hint])=>(
+              <button key={key} onClick={()=>setP("activity",key)} style={{background:profile.activity===key?S.accentDim:S.surface,border:`1px solid ${profile.activity===key?S.accentBorder:S.border}`,borderRadius:12,padding:"12px 14px",cursor:"pointer",textAlign:"left",transition:"all 0.15s"}}>
+                <div style={{fontSize:14,fontWeight:600,color:profile.activity===key?S.accent:S.text}}>{label}</div>
+                <div style={{fontSize:11,color:S.textMuted,marginTop:2}}>{hint}</div>
+              </button>
+            ))}
+          </div>
+        </>}
+
+        {/* Step 3: Results */}
+        {step===3&&editGoals&&<>
+          <div style={{textAlign:"center",marginBottom:20}}>
+            <div style={{fontSize:20,fontWeight:800,color:S.text,fontFamily:"'Plus Jakarta Sans',sans-serif",marginBottom:4}}>{t.yourTargets}</div>
+            <div style={{fontSize:12,color:S.textMuted}}>{t.basedOn}</div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+            {[[t.goalKcal,"kcal","kcal"],[t.goalProtein,"protein","g"],[t.goalCarbs,"carbs","g"],[t.goalFat,"fat","g"]].map(([label,key,unit])=>(
+              <div key={key}>
+                <div style={{fontSize:10,color:S.textMuted,marginBottom:4}}>{label}</div>
+                <div style={{display:"flex",alignItems:"center",background:S.surface,border:`1px solid ${S.accentBorder}`,borderRadius:9,overflow:"hidden"}}>
+                  <input type="number" value={editGoals[key]||""} onChange={e=>setEditGoals(g=>({...g,[key]:parseInt(e.target.value)||0}))} min={0}
+                    style={{flex:1,background:"transparent",border:"none",color:S.accent,fontSize:17,fontFamily:"monospace",padding:"10px 8px",outline:"none",width:0,textAlign:"center"}}/>
+                  <span style={{fontSize:10,color:S.textMuted,paddingRight:8}}>{unit}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{fontSize:11,color:S.textMuted,textAlign:"center"}}>{t.editHint}</div>
+        </>}
+
+        {/* Navigation */}
+        <div style={{display:"flex",gap:8,marginTop:22}}>
+          {step>0&&<button onClick={()=>setStep(s=>s-1)} style={{padding:"12px 14px",background:S.surface,color:S.textMuted,border:`1px solid ${S.border}`,borderRadius:11,fontSize:13,cursor:"pointer"}}>{t.back}</button>}
+          {step<3&&<button onClick={goNext} style={{flex:1,background:S.accent,color:S.bg,border:"none",borderRadius:11,padding:"12px 0",fontSize:13,fontWeight:700,cursor:"pointer"}}>{t.next}</button>}
+          {step===3&&<button onClick={handleComplete} style={{flex:1,background:S.accent,color:S.bg,border:"none",borderRadius:11,padding:"12px 0",fontSize:13,fontWeight:700,cursor:"pointer"}}>{t.startTracking}</button>}
+          {step===0&&<button onClick={onSkip} style={{padding:"12px 12px",background:S.surface,color:S.textMuted,border:`1px solid ${S.border}`,borderRadius:11,fontSize:11,cursor:"pointer"}}>{t.skipOnboard}</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ═══ SETTINGS MODAL ════════════════════════════════════════════════════ */
-function SettingsModal({ user, S, lang, skinId, onSave, onClose, history, goals, onSaveGoals }) {
+function SettingsModal({ user, S, lang, skinId, onSave, onClose, history, goals, onSaveGoals, onRecalc }) {
   const [selLang,setSelLang]=useState(lang);
   const [selSkin,setSelSkin]=useState(skinId);
   const [selGoals,setSelGoals]=useState(goals||DEFAULT_GOALS);
@@ -393,7 +532,10 @@ function SettingsModal({ user, S, lang, skinId, onSave, onClose, history, goals,
         </div>
         {/* Goals */}
         <div style={{marginBottom:18}}>
-          <div style={{fontSize:10,color:S.textMuted,textTransform:"uppercase",letterSpacing:1.5,marginBottom:4}}>{t.setGoals}</div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+            <div style={{fontSize:10,color:S.textMuted,textTransform:"uppercase",letterSpacing:1.5}}>{t.setGoals}</div>
+            {onRecalc&&<button onClick={()=>{onRecalc();onClose();}} style={{fontSize:10,color:S.accent,background:S.accentDim,border:`1px solid ${S.accentBorder}`,borderRadius:8,padding:"3px 9px",cursor:"pointer"}}>↩ {t.recalcGoals}</button>}
+          </div>
           <div style={{fontSize:11,color:S.textMuted,marginBottom:10}}>{t.goalsHint}</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
             {[[t.goalKcal,"kcal","kcal"],[t.goalProtein,"protein","g"],[t.goalCarbs,"carbs","g"],[t.goalFat,"fat","g"]].map(([label,key,unit])=>(
@@ -1118,6 +1260,7 @@ function App({ user, onLogout }) {
   const [showSettings,setShowSettings]=useState(false);
   const [toast,setToast]=useState(null);
   const [goals,setGoals]=useState(()=>loadGoals(user.id));
+  const [showOnboarding,setShowOnboarding]=useState(()=>!loadGoals(user.id));
   const today=todayKey();
   const S=SKINS[skinId]; const t=T[lang];
 
@@ -1162,6 +1305,7 @@ function App({ user, onLogout }) {
   const updateMeal=(date,slotId,entry)=>{ const isT=date===today; const base=isT?todayData:(history[date]||{meals:{},workout:{},weight:""}); const nd={...base,meals:{...base.meals,[slotId]:entry}}; if(!entry)delete nd.meals[slotId]; if(isT)setTodayData(nd); persist(date,nd); };
   const updateStats=(date,stats)=>{ const isT=date===today; const base=isT?todayData:(history[date]||{meals:{},workout:{},weight:""}); const nd={...base,...stats}; if(isT)setTodayData(nd); persist(date,nd); };
   const handleSaveGoals=g=>{ setGoals(g); saveGoals(user.id,g); };
+  const handleOnboardingComplete=g=>{ handleSaveGoals(g); setShowOnboarding(false); };
   const handleSaveSettings=async(newLang,newSkin)=>{ setLang(newLang); setSkinId(newSkin); setShowSettings(false); await updateUserPrefs(user.id,{lang:newLang,skin:newSkin}); showToast(T[newLang].settingsSaved); };
   const handleCalSelect=d=>{setShowCal(false);if(d===today)setTab("today");else{setTab("history");setHistoryDay(d);};};
   const dayKcal=Object.values(todayData.meals||{}).reduce((s,e)=>s+(e?.totals?.calories||0),0);
@@ -1172,7 +1316,8 @@ function App({ user, onLogout }) {
     <div style={{minHeight:"100vh",background:S.bg,fontFamily:"'DM Sans',sans-serif",color:S.text,paddingBottom:60,transition:"background 0.4s"}}>
       {toast&&<div style={{position:"fixed",bottom:28,left:"50%",transform:"translateX(-50%)",background:S.card,border:`1px solid ${S.accentBorder}`,color:S.accent,padding:"10px 22px",borderRadius:30,fontSize:13,zIndex:999,animation:"toastIn 0.3s ease",whiteSpace:"nowrap",boxShadow:"0 6px 24px rgba(0,0,0,0.5)"}}>{toast}</div>}
       {showCal&&<CalendarPicker history={history} onSelect={handleCalSelect} onClose={()=>setShowCal(false)} S={S} t={t} lang={lang}/>}
-      {showSettings&&<SettingsModal user={user} S={S} lang={lang} skinId={skinId} onSave={handleSaveSettings} onClose={()=>setShowSettings(false)} history={{...history,[today]:todayData}} goals={goals} onSaveGoals={handleSaveGoals}/>}
+      {showOnboarding&&<OnboardingModal user={user} S={S} t={t} onComplete={handleOnboardingComplete} onSkip={()=>setShowOnboarding(false)}/>}
+      {showSettings&&<SettingsModal user={user} S={S} lang={lang} skinId={skinId} onSave={handleSaveSettings} onClose={()=>setShowSettings(false)} history={{...history,[today]:todayData}} goals={goals} onSaveGoals={handleSaveGoals} onRecalc={()=>{setShowOnboarding(true);setShowSettings(false);}}/>}
 
       {/* Header */}
       <div style={{padding:"24px 18px 0",borderBottom:`1px solid ${S.border}`}}>
