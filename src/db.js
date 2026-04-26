@@ -1,13 +1,94 @@
-import { supabase } from './supabaseClient'
+import { supabase, isSupabaseConfigured } from './supabaseClient'
+
+/* ─── PIN hashing ─────────────────────────────────────────────────────────── */
 
 async function hashPin(pin) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pin))
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
+/* ─── localStorage fallback ──────────────────────────────────────────────── */
+// Used automatically when VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are not set.
+
+function lsGet(key, def = null) {
+  try { return JSON.parse(localStorage.getItem(`tracky-db-${key}`) ?? 'null') ?? def } catch { return def }
+}
+function lsSet(key, val) {
+  try { localStorage.setItem(`tracky-db-${key}`, JSON.stringify(val)) } catch {}
+}
+
+async function ls_getUsers() {
+  return lsGet('users', [])
+}
+
+async function ls_createUser({ name, pin, lang = 'en', skin = 'green' }) {
+  const users = lsGet('users', [])
+  if (users.find(u => u.name.toLowerCase() === name.toLowerCase()))
+    throw new Error('Name already taken')
+  const pin_hash = await hashPin(pin)
+  const user = { id: Date.now().toString(), name, pin_hash, lang, skin, created_at: new Date().toISOString() }
+  lsSet('users', [...users, user])
+  const { pin_hash: _h, ...safe } = user
+  return safe
+}
+
+async function ls_verifyUser(userId, pin) {
+  const pin_hash = await hashPin(pin)
+  const user = lsGet('users', []).find(u => u.id === userId && u.pin_hash === pin_hash)
+  if (!user) return null
+  const { pin_hash: _h, ...safe } = user
+  return safe
+}
+
+async function ls_updateUserPrefs(userId, prefs) {
+  const users = lsGet('users', []).map(u => u.id === userId ? { ...u, ...prefs } : u)
+  lsSet('users', users)
+}
+
+async function ls_getUserData(userId) {
+  return lsGet(`data-${userId}`, {})
+}
+
+async function ls_saveDayData(userId, date, dayData) {
+  const data = lsGet(`data-${userId}`, {})
+  lsSet(`data-${userId}`, { ...data, [date]: dayData })
+}
+
+async function ls_getPresets(userId) {
+  return lsGet(`presets-${userId}`, [])
+}
+
+async function ls_addPreset(userId, preset) {
+  const presets = lsGet(`presets-${userId}`, [])
+  const newPreset = {
+    ...preset,
+    id: Date.now().toString(),
+    user_id: userId,
+    slotId: preset.slotId,
+    saved_at: new Date().toISOString(),
+  }
+  lsSet(`presets-${userId}`, [newPreset, ...presets])
+  return newPreset
+}
+
+async function ls_deletePreset(presetId) {
+  for (const key of Object.keys(localStorage)) {
+    if (!key.startsWith('tracky-db-presets-')) continue
+    try {
+      const presets = JSON.parse(localStorage.getItem(key) || '[]')
+      const filtered = presets.filter(p => p.id !== presetId)
+      if (filtered.length !== presets.length) {
+        localStorage.setItem(key, JSON.stringify(filtered))
+        return
+      }
+    } catch {}
+  }
+}
+
 /* ─── Users ─────────────────────────────────────────────────────────────── */
 
 export async function getUsers() {
+  if (!isSupabaseConfigured) return ls_getUsers()
   const { data, error } = await supabase
     .from('users')
     .select('id, name, lang, skin, created_at')
@@ -17,6 +98,7 @@ export async function getUsers() {
 }
 
 export async function createUser({ name, pin, lang = 'en', skin = 'green' }) {
+  if (!isSupabaseConfigured) return ls_createUser({ name, pin, lang, skin })
   const id = Date.now().toString()
   const pin_hash = await hashPin(pin)
   const { data, error } = await supabase
@@ -29,6 +111,7 @@ export async function createUser({ name, pin, lang = 'en', skin = 'green' }) {
 }
 
 export async function verifyUser(userId, pin) {
+  if (!isSupabaseConfigured) return ls_verifyUser(userId, pin)
   const pin_hash = await hashPin(pin)
   const { data, error } = await supabase
     .from('users')
@@ -41,6 +124,7 @@ export async function verifyUser(userId, pin) {
 }
 
 export async function updateUserPrefs(userId, { lang, skin }) {
+  if (!isSupabaseConfigured) return ls_updateUserPrefs(userId, { lang, skin })
   const { error } = await supabase
     .from('users')
     .update({ lang, skin })
@@ -51,6 +135,7 @@ export async function updateUserPrefs(userId, { lang, skin }) {
 /* ─── Daily logs ─────────────────────────────────────────────────────────── */
 
 export async function getUserData(userId) {
+  if (!isSupabaseConfigured) return ls_getUserData(userId)
   const { data, error } = await supabase
     .from('daily_logs')
     .select('date, meals, workout, weight')
@@ -65,6 +150,7 @@ export async function getUserData(userId) {
 }
 
 export async function saveDayData(userId, date, dayData) {
+  if (!isSupabaseConfigured) return ls_saveDayData(userId, date, dayData)
   const processedDay = await _uploadPhotosInDay(userId, date, dayData)
   const { error } = await supabase
     .from('daily_logs')
@@ -85,6 +171,7 @@ export async function saveDayData(userId, date, dayData) {
 /* ─── Presets ────────────────────────────────────────────────────────────── */
 
 export async function getPresets(userId) {
+  if (!isSupabaseConfigured) return ls_getPresets(userId)
   const { data, error } = await supabase
     .from('presets')
     .select('*')
@@ -95,6 +182,7 @@ export async function getPresets(userId) {
 }
 
 export async function addPreset(userId, preset) {
+  if (!isSupabaseConfigured) return ls_addPreset(userId, preset)
   const { data, error } = await supabase
     .from('presets')
     .insert({
@@ -109,11 +197,11 @@ export async function addPreset(userId, preset) {
     .select()
     .single()
   if (error) throw new Error(error.message)
-  // normalise field names to match local usage
   return { ...data, slotId: data.slot_id }
 }
 
 export async function deletePreset(id) {
+  if (!isSupabaseConfigured) return ls_deletePreset(id)
   const { error } = await supabase.from('presets').delete().eq('id', id)
   if (error) console.error('deletePreset:', error)
 }
@@ -142,7 +230,6 @@ async function _uploadPhotosInDay(userId, date, dayData) {
 
     const updatedPhotos = await Promise.all(
       entry.photos.map(async photo => {
-        // already uploaded or no base64 to upload
         if (photo.url || !photo.base64) {
           const { base64: _b, imageUrl: _i, mediaType: _m, ...rest } = photo
           return rest
