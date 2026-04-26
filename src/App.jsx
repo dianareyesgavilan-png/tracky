@@ -67,6 +67,9 @@ const T = {
     analyzeAI:"Analyze with AI", usePreset:"Use Preset", saveAsPreset:"Save as Preset",
     presetName:"Preset name…", noPresets:"No presets yet", use:"Use", presetSaved:"✓ Saved",
     manualInput:"Manual", titleHint:"What did you eat? e.g. milanesa con pure", analyzeWithTitle:"Analyze portions",
+    streak:"day streak", dailyGoals:"Daily Goals", noGoals:"Set goals to track progress here",
+    goalKcal:"Calories", goalProtein:"Protein (g)", goalCarbs:"Carbs (g)", goalFat:"Fat (g)",
+    setGoals:"Daily Goals", goalsHint:"Your daily nutrition targets",
   },
   es: {
     appTagline:"diario de comidas", today:"Hoy", week:"Semana", history:"Historial",
@@ -104,6 +107,9 @@ const T = {
     analyzeAI:"Analizar con IA", usePreset:"Usar Preset", saveAsPreset:"Guardar Preset",
     presetName:"Nombre del preset…", noPresets:"Sin presets todavía", use:"Usar", presetSaved:"✓ Guardado",
     manualInput:"Manual", titleHint:"¿Qué comiste? ej. milanesa con puré", analyzeWithTitle:"Analizar porciones",
+    streak:"días seguidos", dailyGoals:"Meta del día", noGoals:"Definí tus metas para ver el progreso aquí",
+    goalKcal:"Calorías", goalProtein:"Proteína (g)", goalCarbs:"Carbos (g)", goalFat:"Grasa (g)",
+    setGoals:"Metas diarias", goalsHint:"Tus objetivos nutricionales diarios",
   },
 };
 
@@ -132,6 +138,20 @@ function getWeekDays(anchor) {
   const mon=new Date(a); mon.setDate(a.getDate()-((a.getDay()+6)%7));
   return Array.from({length:7},(_,i)=>{ const dd=new Date(mon); dd.setDate(mon.getDate()+i); return isoDate(dd); });
 }
+function calcStreak(history) {
+  const d=new Date(); let streak=0;
+  for(let i=0;i<366;i++){
+    const key=isoDate(d);
+    const hasLog=Object.values(history[key]?.meals||{}).some(e=>e?.status==="done");
+    if(!hasLog){if(i===0){d.setDate(d.getDate()-1);continue;}break;}
+    streak++; d.setDate(d.getDate()-1);
+  }
+  return streak;
+}
+function loadGoals(uid) { try{return JSON.parse(localStorage.getItem(`tracky-goals-${uid}`)||"null");}catch{return null;} }
+function saveGoals(uid,g) { try{localStorage.setItem(`tracky-goals-${uid}`,JSON.stringify(g));}catch{} }
+const DEFAULT_GOALS={kcal:2000,protein:120,carbs:200,fat:65};
+
 function getCalendarDays(year,month) {
   const first=new Date(year,month,1); const last=new Date(year,month+1,0);
   const startDow=(first.getDay()+6)%7;
@@ -148,6 +168,68 @@ function photoSrc(photo) {
   if (photo.url) return photo.url;
   if (photo.base64) return `data:${photo.mediaType||"image/jpeg"};base64,${photo.base64}`;
   return null;
+}
+
+/* ═══ TODAY HEADER ════════════════════════════════════════════════════════ */
+function TodayHeader({ streak, kcal, loggedCount, goals, S, t }) {
+  const hasGoal=goals?.kcal>0;
+  const pct=hasGoal?Math.min(100,Math.round(kcal/goals.kcal*100)):null;
+  const over=hasGoal&&kcal>goals.kcal;
+  if(!streak&&!kcal) return null;
+  return (
+    <div style={{display:"flex",gap:10,marginBottom:16}}>
+      {streak>0&&<div style={{background:"rgba(255,180,80,0.08)",border:"1px solid rgba(255,180,80,0.18)",borderRadius:14,padding:"13px 16px",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+        <span style={{fontSize:24}}>🔥</span>
+        <div>
+          <div style={{fontSize:22,fontWeight:800,color:S.orange,fontFamily:"monospace",lineHeight:1}}>{streak}</div>
+          <div style={{fontSize:9,color:S.textMuted,textTransform:"uppercase",letterSpacing:1,marginTop:3}}>{t.streak}</div>
+        </div>
+      </div>}
+      {kcal>0&&<div style={{flex:1,background:S.surface,border:`1px solid ${S.border}`,borderRadius:14,padding:"13px 14px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:hasGoal?7:0}}>
+          <div style={{fontSize:26,fontWeight:800,color:S.accent,fontFamily:"monospace",lineHeight:1}}>{kcal}</div>
+          <div style={{fontSize:10,color:S.textMuted}}>{t.kcal} · {loggedCount}/6</div>
+        </div>
+        {hasGoal&&<>
+          <div style={{height:5,borderRadius:3,background:"rgba(255,255,255,0.07)"}}>
+            <div style={{height:"100%",width:`${pct}%`,background:over?S.orange:S.accent,borderRadius:3,transition:"width 0.6s ease"}}/>
+          </div>
+          <div style={{fontSize:10,color:over?S.orange:S.textMuted,marginTop:5}}>{pct}% {t.of} {goals.kcal} kcal</div>
+        </>}
+      </div>}
+    </div>
+  );
+}
+
+/* ═══ GOALS PROGRESS ══════════════════════════════════════════════════════ */
+function GoalsProgress({ totals, goals, S, t }) {
+  if(!goals) return <div style={{marginTop:14,background:S.surface,border:`1px dashed ${S.border}`,borderRadius:13,padding:"14px",textAlign:"center",color:S.textMuted,fontSize:12}}>{t.noGoals}</div>;
+  const items=[
+    [t.protein, totals.protein, goals.protein, "#f4845f"],
+    [t.carbs,   totals.carbs,   goals.carbs,   "#f6c954"],
+    [t.fat,     totals.fat,     goals.fat,      "#c084fc"],
+    [t.fibre,   totals.fibre,   null,           S.blue],
+  ].filter(([,,goal])=>goal>0);
+  return (
+    <div style={{marginTop:14,background:S.surface,border:`1px solid ${S.border}`,borderRadius:13,padding:"14px 14px 10px"}}>
+      <div style={{fontSize:10,color:S.textMuted,textTransform:"uppercase",letterSpacing:1,marginBottom:12}}>{t.dailyGoals}</div>
+      {items.map(([label,val,goal,col])=>{
+        const pct=Math.min(100,Math.round(val/(goal||1)*100));
+        const over=val>goal;
+        return (
+          <div key={label} style={{marginBottom:10}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
+              <span style={{fontSize:11,color:S.textMuted}}>{label}</span>
+              <span style={{fontSize:12,fontWeight:600,color:over?S.orange:col,fontFamily:"monospace"}}>{val}g <span style={{fontWeight:400,color:S.textMuted}}>/ {goal}g</span></span>
+            </div>
+            <div style={{height:5,borderRadius:3,background:"rgba(255,255,255,0.07)"}}>
+              <div style={{height:"100%",width:`${pct}%`,background:over?S.orange:col,borderRadius:3,transition:"width 0.6s ease"}}/>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 /* ═══ MACRO BAR ═══════════════════════════════════════════════════════════ */
@@ -225,9 +307,11 @@ function Wordmark({ S, size=28 }) {
 }
 
 /* ═══ SETTINGS MODAL ════════════════════════════════════════════════════ */
-function SettingsModal({ user, S, lang, skinId, onSave, onClose, history }) {
+function SettingsModal({ user, S, lang, skinId, onSave, onClose, history, goals, onSaveGoals }) {
   const [selLang,setSelLang]=useState(lang);
   const [selSkin,setSelSkin]=useState(skinId);
+  const [selGoals,setSelGoals]=useState(goals||DEFAULT_GOALS);
+  const setGoal=(k,v)=>setSelGoals(g=>({...g,[k]:parseInt(v)||0}));
   const t=T[selLang]; const PS=SKINS[selSkin];
   const slots=getMealSlots(selLang);
   const defaultReminders=slots.reduce((a,s)=>({...a,[s.id]:{enabled:true,time:`${String(s.rH).padStart(2,"0")}:${String(s.rM+30).padStart(2,"0")}`}}),{});
@@ -291,9 +375,25 @@ function SettingsModal({ user, S, lang, skinId, onSave, onClose, history }) {
             {notifStatus==="granted"?"🔔 "+t.reminderSet.replace("✓ ",""):"🔔 "+t.enableReminders}
           </button>
         </div>
+        {/* Goals */}
+        <div style={{marginBottom:18}}>
+          <div style={{fontSize:10,color:S.textMuted,textTransform:"uppercase",letterSpacing:1.5,marginBottom:4}}>{t.setGoals}</div>
+          <div style={{fontSize:11,color:S.textMuted,marginBottom:10}}>{t.goalsHint}</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            {[[t.goalKcal,"kcal","kcal"],[t.goalProtein,"protein","g"],[t.goalCarbs,"carbs","g"],[t.goalFat,"fat","g"]].map(([label,key,unit])=>(
+              <div key={key}>
+                <div style={{fontSize:10,color:S.textMuted,marginBottom:4}}>{label}</div>
+                <div style={{display:"flex",alignItems:"center",background:S.surface,border:`1px solid ${S.border}`,borderRadius:9,overflow:"hidden"}}>
+                  <input type="number" value={selGoals[key]||""} onChange={e=>setGoal(key,e.target.value)} style={{flex:1,background:"transparent",border:"none",color:S.text,fontSize:14,fontFamily:"monospace",padding:"8px 10px",outline:"none",width:0}} min={0}/>
+                  <span style={{fontSize:10,color:S.textMuted,paddingRight:8}}>{unit}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
         <button onClick={()=>{ const today=todayKey(); exportBackup(history,history[today]||{},today,user.id,user.name); localStorage.setItem(`tracky-lastbackup-${user.id}`,Date.now().toString()); }} style={{width:"100%",marginBottom:8,background:"rgba(255,255,255,0.04)",border:`1px solid ${S.border}`,color:S.textMuted,borderRadius:11,padding:"11px 0",fontSize:13,fontWeight:600,cursor:"pointer"}}>💾 {lang==="es"?"Backup ahora":"Backup now"}</button>
         <div style={{display:"flex",gap:8}}>
-          <button onClick={()=>{localStorage.setItem(`tracky-reminders-${user.id}`,JSON.stringify(reminders));const sw=navigator.serviceWorker?.controller;if(sw)sw.postMessage({type:"SCHEDULE_REMINDERS",reminders,lang:selLang});onSave(selLang,selSkin);}} style={{flex:1,background:PS.accent,color:PS.bg,border:"none",borderRadius:11,padding:"12px 0",fontSize:13,fontWeight:700,cursor:"pointer"}}>{t.save}</button>
+          <button onClick={()=>{localStorage.setItem(`tracky-reminders-${user.id}`,JSON.stringify(reminders));const sw=navigator.serviceWorker?.controller;if(sw)sw.postMessage({type:"SCHEDULE_REMINDERS",reminders,lang:selLang});onSaveGoals(selGoals);onSave(selLang,selSkin);}} style={{flex:1,background:PS.accent,color:PS.bg,border:"none",borderRadius:11,padding:"12px 0",fontSize:13,fontWeight:700,cursor:"pointer"}}>{t.save}</button>
           <button onClick={onClose} style={{padding:"12px 16px",background:S.surface,color:S.textMuted,border:`1px solid ${S.border}`,borderRadius:11,fontSize:13,cursor:"pointer"}}>{t.cancel}</button>
         </div>
       </div>
@@ -985,7 +1085,7 @@ function buildPDF(history, userName, lang) {
     return `<div style="margin-bottom:32px;page-break-inside:avoid"><h3 style="font-size:15px;color:#1a3a2a;border-bottom:2px solid #c8e6c0;padding-bottom:6px;margin-bottom:8px;text-transform:capitalize">${fmtFull(date,lang)}</h3><table style="width:100%;border-collapse:collapse;font-size:12px;font-family:Helvetica,Arial,sans-serif"><thead><tr style="background:#edf7ea"><th style="padding:6px 10px;text-align:left;color:#1a3a2a;font-size:10px;text-transform:uppercase;letter-spacing:.8px;width:110px">${lang==="es"?"Comida":"Meal"}</th><th style="padding:6px 10px;text-align:left;color:#1a3a2a;font-size:10px;text-transform:uppercase;letter-spacing:.8px">${lang==="es"?"Ingredientes":"Ingredients"}</th><th style="padding:6px 10px;text-align:left;color:#1a3a2a;font-size:10px;text-transform:uppercase;letter-spacing:.8px;width:155px">Macros</th><th style="padding:6px 10px;text-align:left;color:#1a3a2a;font-size:10px;text-transform:uppercase;letter-spacing:.8px;width:175px">${lang==="es"?"Fotos":"Photos"}</th></tr></thead><tbody>${rows}${wRow}${wtRow}${totRow}</tbody></table></div>`;
   }).join("");
   const tot=entries.length; const meals=entries.reduce((s,[,d])=>s+Object.values(d.meals||{}).filter(e=>e?.status==="done").length,0); const wDays=entries.filter(([,d])=>d.workout?.type).length;
-  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Tracky. — ${userName}</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Georgia,serif;color:#111;padding:44px 48px;max-width:920px;margin:0 auto;font-size:13px;line-height:1.5}h1{font-family:'Plus Jakarta Sans',Helvetica,sans-serif;font-size:30px;font-weight:900;letter-spacing:-1.5px;color:#1a3a2a;margin-bottom:3px}h1 span{color:#2d7a3a}.sub{color:#777;font-size:12px;margin-bottom:12px;font-family:Helvetica,sans-serif}.stats{display:flex;gap:16px;margin-bottom:16px}.sb{background:#edf7ea;border:1px solid #c8e6c0;border-radius:8px;padding:10px 16px;text-align:center}.sb .n{font-size:22px;font-weight:bold;color:#1a3a2a;font-family:'Courier New',monospace}.sb .l{font-size:10px;color:#666;font-family:Helvetica,sans-serif;text-transform:uppercase;letter-spacing:.5px;margin-top:2px}hr{border:none;border-top:2px solid #c8e6c0;margin-bottom:28px}button.pb{background:#1a3a2a;color:white;border:none;padding:9px 22px;border-radius:6px;cursor:pointer;font-size:13px;margin-bottom:28px;font-family:Helvetica,sans-serif}td{padding:8px 10px;vertical-align:top;border-bottom:1px solid #f0f0f0}tr:last-child td{border-bottom:none}tr:nth-child(even) td{background:#fafff9}.er td{color:#bbb}.bo{font-weight:600;color:#222}.mu{color:#bbb}@media print{.pb{display:none}}</style></head><body><h1>Tracky<span>.</span></h1><p class="sub">${userName} · ${new Date().toLocaleDateString(lang==="es"?"es-AR":"en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</p><div class="stats"><div class="sb"><div class="n">${tot}</div><div class="l">${t.days}</div></div><div class="sb"><div class="n">${meals}</div><div class="l">${t.mealsLogged}</div></div><div class="sb"><div class="n">${wDays}</div><div class="l">${t.workoutDays}</div></div></div><button class="pb" onclick="window.print()">🖨 ${t.printPdf}</button><hr/>${dayBlocks||`<p style="color:#aaa">${t.noHistory}</p>`}</body></html>`;
+  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Tracky. — ${userName}</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Georgia,serif;color:#111;padding:44px 48px;max-width:920px;margin:0 auto;font-size:13px;line-height:1.5}h1{font-family:'Plus Jakarta Sans',Helvetica,sans-serif;font-size:30px;font-weight:900;letter-spacing:-1.5px;color:#1a3a2a;margin-bottom:3px}h1 span{color:#2d7a3a}.sub{color:#777;font-size:12px;margin-bottom:12px;font-family:Helvetica,sans-serif}.stats{display:flex;gap:16px;margin-bottom:16px}.sb{background:#edf7ea;border:1px solid #c8e6c0;border-radius:8px;padding:10px 16px;text-align:center}.sb .n{font-size:22px;font-weight:bold;color:#1a3a2a;font-family:'Courier New',monospace}.sb .l{font-size:10px;color:#666;font-family:Helvetica,sans-serif;text-transform:uppercase;letter-spacing:.5px;margin-top:2px}hr{border:none;border-top:2px solid #c8e6c0;margin-bottom:28px}.actions{display:flex;gap:10px;margin-bottom:28px}button.pb{background:#1a3a2a;color:white;border:none;padding:9px 22px;border-radius:6px;cursor:pointer;font-size:13px;font-family:Helvetica,sans-serif}button.back{background:#f4f4f4;color:#333;border:1px solid #ccc}td{padding:8px 10px;vertical-align:top;border-bottom:1px solid #f0f0f0}tr:last-child td{border-bottom:none}tr:nth-child(even) td{background:#fafff9}.er td{color:#bbb}.bo{font-weight:600;color:#222}.mu{color:#bbb}@media print{.actions{display:none}}</style></head><body><h1>Tracky<span>.</span></h1><p class="sub">${userName} · ${new Date().toLocaleDateString(lang==="es"?"es-AR":"en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</p><div class="stats"><div class="sb"><div class="n">${tot}</div><div class="l">${t.days}</div></div><div class="sb"><div class="n">${meals}</div><div class="l">${t.mealsLogged}</div></div><div class="sb"><div class="n">${wDays}</div><div class="l">${t.workoutDays}</div></div></div><div class="actions"><button class="pb back" onclick="window.close()">← ${t.back}</button><button class="pb" onclick="window.print()">🖨 ${t.printPdf}</button></div><hr/>${dayBlocks||`<p style="color:#aaa">${t.noHistory}</p>`}</body></html>`;
   const win=window.open("","_blank"); if(win){win.document.write(html);win.document.close();}
 }
 
@@ -1001,6 +1101,7 @@ function App({ user, onLogout }) {
   const [backupMsg,setBackupMsg]=useState("");
   const [showSettings,setShowSettings]=useState(false);
   const [toast,setToast]=useState(null);
+  const [goals,setGoals]=useState(()=>loadGoals(user.id));
   const today=todayKey();
   const S=SKINS[skinId]; const t=T[lang];
 
@@ -1044,6 +1145,7 @@ function App({ user, onLogout }) {
   const persist=useCallback((date,nd)=>{ setHistory(h=>({...h,[date]:nd})); saveDayData(user.id,date,nd); },[user.id]);
   const updateMeal=(date,slotId,entry)=>{ const isT=date===today; const base=isT?todayData:(history[date]||{meals:{},workout:{},weight:""}); const nd={...base,meals:{...base.meals,[slotId]:entry}}; if(!entry)delete nd.meals[slotId]; if(isT)setTodayData(nd); persist(date,nd); };
   const updateStats=(date,stats)=>{ const isT=date===today; const base=isT?todayData:(history[date]||{meals:{},workout:{},weight:""}); const nd={...base,...stats}; if(isT)setTodayData(nd); persist(date,nd); };
+  const handleSaveGoals=g=>{ setGoals(g); saveGoals(user.id,g); };
   const handleSaveSettings=async(newLang,newSkin)=>{ setLang(newLang); setSkinId(newSkin); setShowSettings(false); await updateUserPrefs(user.id,{lang:newLang,skin:newSkin}); showToast(T[newLang].settingsSaved); };
   const handleCalSelect=d=>{setShowCal(false);if(d===today)setTab("today");else{setTab("history");setHistoryDay(d);};};
   const dayKcal=Object.values(todayData.meals||{}).reduce((s,e)=>s+(e?.totals?.calories||0),0);
@@ -1054,7 +1156,7 @@ function App({ user, onLogout }) {
     <div style={{minHeight:"100vh",background:S.bg,fontFamily:"'DM Sans',sans-serif",color:S.text,paddingBottom:60,transition:"background 0.4s"}}>
       {toast&&<div style={{position:"fixed",bottom:28,left:"50%",transform:"translateX(-50%)",background:S.card,border:`1px solid ${S.accentBorder}`,color:S.accent,padding:"10px 22px",borderRadius:30,fontSize:13,zIndex:999,animation:"toastIn 0.3s ease",whiteSpace:"nowrap",boxShadow:"0 6px 24px rgba(0,0,0,0.5)"}}>{toast}</div>}
       {showCal&&<CalendarPicker history={history} onSelect={handleCalSelect} onClose={()=>setShowCal(false)} S={S} t={t} lang={lang}/>}
-      {showSettings&&<SettingsModal user={user} S={S} lang={lang} skinId={skinId} onSave={handleSaveSettings} onClose={()=>setShowSettings(false)} history={{...history,[today]:todayData}}/>}
+      {showSettings&&<SettingsModal user={user} S={S} lang={lang} skinId={skinId} onSave={handleSaveSettings} onClose={()=>setShowSettings(false)} history={{...history,[today]:todayData}} goals={goals} onSaveGoals={handleSaveGoals}/>}
 
       {/* Header */}
       <div style={{padding:"24px 18px 0",borderBottom:`1px solid ${S.border}`}}>
@@ -1097,7 +1199,12 @@ function App({ user, onLogout }) {
 
       {/* Body */}
       <div style={{maxWidth:560,margin:"0 auto",padding:"16px 18px",animation:"fadeUp 0.35s ease"}}>
-        {tab==="today"&&<><DailyStats stats={{workout:todayData.workout,weight:todayData.weight}} onChange={s=>updateStats(today,s)} readOnly={false} S={S} t={t}/><MealGrid meals={todayData.meals} onUpdate={(id,e)=>updateMeal(today,id,e)} readOnly={false} isBackfill={false} S={S} t={t} lang={lang} userId={user.id}/></>}
+        {tab==="today"&&<>
+          <TodayHeader streak={calcStreak({...history,[today]:todayData})} kcal={dayKcal} loggedCount={loggedCount} goals={goals} S={S} t={t}/>
+          <DailyStats stats={{workout:todayData.workout,weight:todayData.weight}} onChange={s=>updateStats(today,s)} readOnly={false} S={S} t={t}/>
+          <MealGrid meals={todayData.meals} onUpdate={(id,e)=>updateMeal(today,id,e)} readOnly={false} isBackfill={false} S={S} t={t} lang={lang} userId={user.id}/>
+          {(()=>{const tot=Object.values(todayData.meals||{}).reduce((a,e)=>({calories:a.calories+(e?.totals?.calories||0),protein:a.protein+(e?.totals?.protein||0),carbs:a.carbs+(e?.totals?.carbs||0),fat:a.fat+(e?.totals?.fat||0),fibre:a.fibre+(e?.totals?.fibre||0)}),{calories:0,protein:0,carbs:0,fat:0,fibre:0}); return <GoalsProgress totals={tot} goals={goals} S={S} t={t}/>;})()}
+        </>}
         {tab==="week"&&<WeekView history={history} S={S} t={t} lang={lang}/>}
         {tab==="history"&&!historyDay&&<>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
