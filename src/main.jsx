@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import App from './App.jsx'
+import Bootstrap from './Bootstrap.jsx'
 import { inject } from '@vercel/analytics'
 
 inject()
@@ -30,6 +30,6 @@ class ErrorBoundary extends React.Component {
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <ErrorBoundary>
-    <App />
+    <Bootstrap />
   </ErrorBoundary>
 )
