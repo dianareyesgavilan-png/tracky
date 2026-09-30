@@ -12,38 +12,10 @@
       html, body { height: 100%; background: #0b120b; }
       body { background: #0b120b; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
       #root { min-height: 100vh; }
-      .legacy-import-link { margin-top: 10px; text-decoration: none; display: flex !important; align-items: center; justify-content: center; }
-      .legacy-import-hint { margin-top: 12px; text-align: center; font-size: 12px; color: #8e9a90; line-height: 1.4; }
     </style>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
-    <script>
-      (() => {
-        const surfaceLegacyImport = () => {
-          if (document.querySelector('.legacy-import-link')) return;
-          const createButton = [...document.querySelectorAll('button')]
-            .find(button => button.textContent.trim() === 'Create new journal');
-          if (!createButton || document.querySelector('.user-choice')) return;
-
-          const hint = document.createElement('div');
-          hint.className = 'legacy-import-hint';
-          hint.textContent = 'Already use Tracky? Bring your existing user and journal into this V2 preview.';
-
-          const link = document.createElement('a');
-          link.href = '/migrate.html';
-          link.className = 'button button-secondary full legacy-import-link';
-          link.textContent = 'Import existing Tracky';
-
-          createButton.insertAdjacentElement('afterend', hint);
-          hint.insertAdjacentElement('afterend', link);
-        };
-
-        const observer = new MutationObserver(surfaceLegacyImport);
-        observer.observe(document.getElementById('root'), { childList: true, subtree: true });
-        surfaceLegacyImport();
-      })();
-    </script>
   </body>
 </html>
