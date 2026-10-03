@@ -1,114 +1,78 @@
 import { supabase, isSupabaseConfigured } from './supabaseClient'
 
-/* ─── PIN hashing ─────────────────────────────────────────────────────────── */
-
 async function hashPin(pin) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pin))
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
-/* ─── localStorage fallback ──────────────────────────────────────────────── */
-// Used automatically when VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are not set.
-
-function lsGet(key, def = null) {
-  try { return JSON.parse(localStorage.getItem(`tracky-db-${key}`) ?? 'null') ?? def } catch { return def }
-}
-function lsSet(key, val) {
-  try { localStorage.setItem(`tracky-db-${key}`, JSON.stringify(val)) } catch {}
+function lsGet(key, fallback = null) {
+  try { return JSON.parse(localStorage.getItem(`tracky-db-${key}`) ?? 'null') ?? fallback }
+  catch { return fallback }
 }
 
-async function ls_getUsers() {
-  return lsGet('users', [])
+function lsSet(key, value) {
+  try { localStorage.setItem(`tracky-db-${key}`, JSON.stringify(value)) } catch {}
 }
 
-async function ls_createUser({ name, pin, lang = 'en', skin = 'green' }) {
+async function localUsers() { return lsGet('users', []) }
+
+async function localCreateUser({ name, pin, lang = 'en', skin = 'forest' }) {
   const users = lsGet('users', [])
-  if (users.find(u => u.name.toLowerCase() === name.toLowerCase()))
-    throw new Error('Name already taken')
-  const pin_hash = await hashPin(pin)
-  const user = { id: Date.now().toString(), name, pin_hash, lang, skin, created_at: new Date().toISOString() }
-  lsSet('users', [...users, user])
-  const { pin_hash: _h, ...safe } = user
-  return safe
-}
-
-async function ls_verifyUser(userId, pin) {
-  const pin_hash = await hashPin(pin)
-  const user = lsGet('users', []).find(u => u.id === userId && u.pin_hash === pin_hash)
-  if (!user) return null
-  const { pin_hash: _h, ...safe } = user
-  return safe
-}
-
-async function ls_updateUserPrefs(userId, prefs) {
-  const users = lsGet('users', []).map(u => u.id === userId ? { ...u, ...prefs } : u)
-  lsSet('users', users)
-}
-
-async function ls_getUserData(userId) {
-  return lsGet(`data-${userId}`, {})
-}
-
-async function ls_saveDayData(userId, date, dayData) {
-  const data = lsGet(`data-${userId}`, {})
-  lsSet(`data-${userId}`, { ...data, [date]: dayData })
-}
-
-async function ls_getPresets(userId) {
-  return lsGet(`presets-${userId}`, [])
-}
-
-async function ls_addPreset(userId, preset) {
-  const presets = lsGet(`presets-${userId}`, [])
-  const newPreset = {
-    ...preset,
+  if (users.some(u => u.name.toLowerCase() === name.toLowerCase())) throw new Error('Name already taken')
+  const user = {
     id: Date.now().toString(),
-    user_id: userId,
-    slotId: preset.slotId,
-    saved_at: new Date().toISOString(),
+    name,
+    pin_hash: await hashPin(pin),
+    lang,
+    skin,
+    created_at: new Date().toISOString(),
   }
-  lsSet(`presets-${userId}`, [newPreset, ...presets])
-  return newPreset
+  lsSet('users', [...users, user])
+  const { pin_hash: _, ...safe } = user
+  return safe
 }
 
-async function ls_deletePreset(presetId) {
-  for (const key of Object.keys(localStorage)) {
-    if (!key.startsWith('tracky-db-presets-')) continue
-    try {
-      const presets = JSON.parse(localStorage.getItem(key) || '[]')
-      const filtered = presets.filter(p => p.id !== presetId)
-      if (filtered.length !== presets.length) {
-        localStorage.setItem(key, JSON.stringify(filtered))
-        return
-      }
-    } catch {}
-  }
+async function localVerifyUser(userId, pin) {
+  const pinHash = await hashPin(pin)
+  const user = lsGet('users', []).find(u => u.id === userId && u.pin_hash === pinHash)
+  if (!user) return null
+  const { pin_hash: _, ...safe } = user
+  return safe
 }
 
-/* ─── Users ─────────────────────────────────────────────────────────────── */
+async function localUpdateUserPrefs(userId, prefs) {
+  lsSet('users', lsGet('users', []).map(u => u.id === userId ? { ...u, ...prefs } : u))
+}
+
+async function localGetUserData(userId) { return lsGet(`data-${userId}`, {}) }
+
+async function localSaveDayData(userId, date, dayData) {
+  const data = lsGet(`data-${userId}`, {})
+  const next = { ...data, [date]: dayData }
+  lsSet(`data-${userId}`, next)
+  return dayData
+}
 
 export async function getUsers() {
-  if (!isSupabaseConfigured) return ls_getUsers()
+  if (!isSupabaseConfigured) return localUsers()
   try {
     const { data, error } = await supabase
       .from('users')
       .select('id, name, lang, skin, created_at')
       .order('created_at', { ascending: true })
     if (error) throw error
-    const sbUsers = data || []
-    // Merge with any users saved locally during a Supabase outage
-    const lsUsers = await ls_getUsers()
-    const sbIds = new Set(sbUsers.map(u => u.id))
-    const localOnly = lsUsers.filter(u => !sbIds.has(u.id))
-    return [...sbUsers, ...localOnly]
-  } catch (e) {
-    console.warn('Supabase getUsers failed, using localStorage:', e.message)
-    return ls_getUsers()
+    const remote = data || []
+    const local = await localUsers()
+    const ids = new Set(remote.map(u => u.id))
+    return [...remote, ...local.filter(u => !ids.has(u.id))]
+  } catch (error) {
+    console.warn('Supabase getUsers failed, using localStorage:', error.message)
+    return localUsers()
   }
 }
 
-export async function createUser({ name, pin, lang = 'en', skin = 'green' }) {
-  if (!isSupabaseConfigured) return ls_createUser({ name, pin, lang, skin })
+export async function createUser({ name, pin, lang = 'en', skin = 'forest' }) {
+  if (!isSupabaseConfigured) return localCreateUser({ name, pin, lang, skin })
   try {
     const id = Date.now().toString()
     const pin_hash = await hashPin(pin)
@@ -119,14 +83,14 @@ export async function createUser({ name, pin, lang = 'en', skin = 'green' }) {
       .single()
     if (error) throw error
     return data
-  } catch (e) {
-    console.warn('Supabase createUser failed, using localStorage:', e.message)
-    return ls_createUser({ name, pin, lang, skin })
+  } catch (error) {
+    console.warn('Supabase createUser failed, using localStorage:', error.message)
+    return localCreateUser({ name, pin, lang, skin })
   }
 }
 
 export async function verifyUser(userId, pin) {
-  if (!isSupabaseConfigured) return ls_verifyUser(userId, pin)
+  if (!isSupabaseConfigured) return localVerifyUser(userId, pin)
   try {
     const pin_hash = await hashPin(pin)
     const { data, error } = await supabase
@@ -135,183 +99,102 @@ export async function verifyUser(userId, pin) {
       .eq('id', userId)
       .eq('pin_hash', pin_hash)
       .single()
-    // PGRST116 = no rows found (not an error, just not in Supabase yet)
     if (error && error.code !== 'PGRST116') throw error
     if (data) return data
-    // Not found in Supabase — check localStorage (user created during outage)
-    const lsUser = await ls_verifyUser(userId, pin)
-    if (lsUser) {
-      // Migrate user to Supabase silently
-      const raw = lsGet('users', []).find(u => u.id === userId)
-      if (raw) supabase.from('users').upsert(raw, { onConflict: 'id' }).then().catch(() => {})
-    }
-    return lsUser
-  } catch (e) {
-    console.warn('Supabase verifyUser failed, using localStorage:', e.message)
-    return ls_verifyUser(userId, pin)
+    return localVerifyUser(userId, pin)
+  } catch (error) {
+    console.warn('Supabase verifyUser failed, using localStorage:', error.message)
+    return localVerifyUser(userId, pin)
   }
 }
 
-export async function deleteUserAccount(userId) {
-  // Remove from localStorage
-  const users = lsGet('users', []).filter(u => u.id !== userId)
-  lsSet('users', users)
-  // Remove from Supabase
-  if (isSupabaseConfigured) {
-    try { await supabase.from('users').delete().eq('id', userId) } catch {}
-  }
-}
-
-export async function updateUserPrefs(userId, { lang, skin }) {
-  if (!isSupabaseConfigured) return ls_updateUserPrefs(userId, { lang, skin })
+export async function updateUserPrefs(userId, prefs) {
+  if (!isSupabaseConfigured) return localUpdateUserPrefs(userId, prefs)
   try {
-    const { error } = await supabase.from('users').update({ lang, skin }).eq('id', userId)
+    const { error } = await supabase.from('users').update(prefs).eq('id', userId)
     if (error) throw error
-  } catch (e) {
-    console.warn('Supabase updateUserPrefs failed, using localStorage:', e.message)
-    return ls_updateUserPrefs(userId, { lang, skin })
+  } catch (error) {
+    console.warn('Supabase updateUserPrefs failed, using localStorage:', error.message)
+    return localUpdateUserPrefs(userId, prefs)
   }
 }
-
-/* ─── Daily logs ─────────────────────────────────────────────────────────── */
 
 export async function getUserData(userId) {
-  if (!isSupabaseConfigured) return ls_getUserData(userId)
+  if (!isSupabaseConfigured) return localGetUserData(userId)
   try {
     const { data, error } = await supabase
       .from('daily_logs')
       .select('date, meals, workout, weight')
       .eq('user_id', userId)
     if (error) throw error
-    return Object.fromEntries(
-      (data || []).map(row => [
-        row.date,
-        { meals: row.meals || {}, workout: row.workout || {}, weight: row.weight || '' }
-      ])
-    )
-  } catch (e) {
-    console.warn('Supabase getUserData failed, using localStorage:', e.message)
-    return ls_getUserData(userId)
+    return Object.fromEntries((data || []).map(row => [row.date, {
+      meals: row.meals || {},
+      workout: row.workout || null,
+      workouts: Array.isArray(row.workout) ? row.workout : undefined,
+      weight: row.weight || '',
+    }]))
+  } catch (error) {
+    console.warn('Supabase getUserData failed, using localStorage:', error.message)
+    return localGetUserData(userId)
   }
 }
 
 export async function saveDayData(userId, date, dayData) {
-  if (!isSupabaseConfigured) return ls_saveDayData(userId, date, dayData)
+  if (!isSupabaseConfigured) return localSaveDayData(userId, date, dayData)
   try {
-    const processedDay = await _uploadPhotosInDay(userId, date, dayData)
+    const processed = await uploadNewMealPhotos(userId, date, dayData)
     const { error } = await supabase
       .from('daily_logs')
-      .upsert(
-        {
-          user_id: userId,
-          date,
-          meals: processedDay.meals || {},
-          workout: processedDay.workout || null,
-          weight: processedDay.weight || null,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'user_id,date' }
-      )
-    if (error) throw error
-  } catch (e) {
-    console.warn('Supabase saveDayData failed, using localStorage:', e.message)
-    return ls_saveDayData(userId, date, dayData)
-  }
-}
-
-/* ─── Presets ────────────────────────────────────────────────────────────── */
-
-export async function getPresets(userId) {
-  if (!isSupabaseConfigured) return ls_getPresets(userId)
-  try {
-    const { data, error } = await supabase
-      .from('presets')
-      .select('*')
-      .eq('user_id', userId)
-      .order('saved_at', { ascending: false })
-    if (error) throw error
-    return data || []
-  } catch (e) {
-    console.warn('Supabase getPresets failed, using localStorage:', e.message)
-    return ls_getPresets(userId)
-  }
-}
-
-export async function addPreset(userId, preset) {
-  if (!isSupabaseConfigured) return ls_addPreset(userId, preset)
-  try {
-    const { data, error } = await supabase
-      .from('presets')
-      .insert({
+      .upsert({
         user_id: userId,
-        name: preset.name,
-        slot_id: preset.slotId,
-        description: preset.description || '',
-        ingredients: preset.ingredients || [],
-        totals: preset.totals || {},
-        saved_at: new Date().toISOString(),
-      })
-      .select()
-      .single()
+        date,
+        meals: processed.meals || {},
+        workout: processed.workouts || [],
+        weight: processed.weight || null,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id,date' })
     if (error) throw error
-    return { ...data, slotId: data.slot_id }
-  } catch (e) {
-    console.warn('Supabase addPreset failed, using localStorage:', e.message)
-    return ls_addPreset(userId, preset)
+    return processed
+  } catch (error) {
+    console.warn('Supabase saveDayData failed, using localStorage:', error.message)
+    return localSaveDayData(userId, date, dayData)
   }
 }
 
-export async function deletePreset(id) {
-  if (!isSupabaseConfigured) return ls_deletePreset(id)
-  try {
-    const { error } = await supabase.from('presets').delete().eq('id', id)
-    if (error) throw error
-  } catch (e) {
-    console.warn('Supabase deletePreset failed, using localStorage:', e.message)
-    return ls_deletePreset(id)
-  }
-}
-
-/* ─── Photos (Supabase Storage) ──────────────────────────────────────────── */
-
-export async function uploadPhoto(userId, date, slotId, base64) {
-  const path = `${userId}/${date}/${slotId}/${Date.now()}.jpg`
-  const blob = await fetch(`data:image/jpeg;base64,${base64}`).then(r => r.blob())
-  const { error } = await supabase.storage
-    .from('meal-photos')
-    .upload(path, blob, { contentType: 'image/jpeg', upsert: false })
-  if (error) throw new Error(error.message)
-  const { data } = supabase.storage.from('meal-photos').getPublicUrl(path)
-  return data.publicUrl
-}
-
-/* ─── Internal helpers ───────────────────────────────────────────────────── */
-
-async function _uploadPhotosInDay(userId, date, dayData) {
+async function uploadNewMealPhotos(userId, date, dayData) {
   const meals = dayData.meals || {}
   const updatedMeals = {}
 
-  for (const [slotId, entry] of Object.entries(meals)) {
-    if (!entry?.photos?.length) { updatedMeals[slotId] = entry; continue }
-
-    const updatedPhotos = await Promise.all(
-      entry.photos.map(async photo => {
-        if (photo.url || !photo.base64) {
-          const { base64: _b, imageUrl: _i, mediaType: _m, ...rest } = photo
-          return rest
-        }
-        try {
-          const url = await uploadPhoto(userId, date, slotId, photo.base64)
-          const { base64: _b, imageUrl: _i, mediaType: _m, ...rest } = photo
-          return { ...rest, url }
-        } catch (e) {
-          console.error('Photo upload failed, keeping base64:', e)
-          return photo
-        }
-      })
-    )
-    updatedMeals[slotId] = { ...entry, photos: updatedPhotos }
+  for (const [mealId, meal] of Object.entries(meals)) {
+    const photos = meal?.photos || []
+    const uploaded = []
+    for (const photo of photos) {
+      if (photo.url || !photo.base64) {
+        const { base64: _, imageUrl: __, ...rest } = photo
+        uploaded.push(rest)
+        continue
+      }
+      try {
+        const url = await uploadPhoto(userId, date, mealId, photo)
+        uploaded.push({ url, mediaType: 'image/jpeg' })
+      } catch (error) {
+        console.error('Photo upload failed; keeping local image:', error)
+        uploaded.push(photo)
+      }
+    }
+    updatedMeals[mealId] = { ...meal, photos: uploaded }
   }
 
   return { ...dayData, meals: updatedMeals }
+}
+
+async function uploadPhoto(userId, date, mealId, photo) {
+  const path = `${userId}/${date}/${mealId}/${Date.now()}.jpg`
+  const blob = await fetch(`data:${photo.mediaType || 'image/jpeg'};base64,${photo.base64}`).then(r => r.blob())
+  const { error } = await supabase.storage
+    .from('meal-photos')
+    .upload(path, blob, { contentType: 'image/jpeg', upsert: false })
+  if (error) throw error
+  const { data } = supabase.storage.from('meal-photos').getPublicUrl(path)
+  return data.publicUrl
 }
